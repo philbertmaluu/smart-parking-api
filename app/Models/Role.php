@@ -33,6 +33,18 @@ class Role extends Model
     }
 
     /**
+     * Get all permissions that belong to this role.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     */
+    public function permissions()
+    {
+        return $this->belongsToMany(Permission::class, 'role_has_permissions')
+            ->withPivot('assigned_at', 'assigned_by')
+            ->withTimestamps();
+    }
+
+    /**
      * Scope a query to only include active roles.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query

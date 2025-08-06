@@ -48,6 +48,18 @@ class Permission extends Model
     }
 
     /**
+     * Get all roles that have this permission.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     */
+    public function roles()
+    {
+        return $this->belongsToMany(Role::class, 'role_has_permissions')
+            ->withPivot('assigned_at', 'assigned_by')
+            ->withTimestamps();
+    }
+
+    /**
      * Get the user who assigned this permission.
      *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
