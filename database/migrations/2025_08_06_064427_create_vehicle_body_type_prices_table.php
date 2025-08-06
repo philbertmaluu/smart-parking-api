@@ -30,7 +30,7 @@ return new class extends Migration
             $table->index('is_active');
 
             // Unique constraint
-            $table->unique(['body_type_id', 'station_id', 'effective_from']);
+            $table->unique(['body_type_id', 'station_id', 'effective_from'], 'vbp_body_type_station_effective_unique');
         });
     }
 

@@ -5,17 +5,37 @@ use App\Http\Controllers\API\StationController;
 use App\Http\Controllers\API\GateController;
 use App\Http\Controllers\API\VehicleController;
 use App\Http\Controllers\API\CustomerController;
-// use App\Http\Controllers\API\AuthController;
+use App\Http\Controllers\API\AuthController;
 
 // Public routes
-// Route::post('/register', [AuthController::class, 'register']);
-// Route::post('/login', [AuthController::class, 'login']);
+Route::post('/register', [AuthController::class, 'register']);
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/forgot-password', [AuthController::class, 'sendResetLink']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
 // Protected routes
-Route::middleware('auth:sanctum')->group(function () {
+Route::prefix('toll-v1')->middleware('auth:sanctum')->group(function () {
     // Auth routes
-    // Route::post('/logout', [AuthController::class, 'logout']);
-    // Route::get('/user', [AuthController::class, 'user']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/user', [AuthController::class, 'user']);
+    Route::put('/profile', [AuthController::class, 'updateProfile']);
+    Route::post('/change-password', [AuthController::class, 'changePassword']);
+    Route::post('/refresh-token', [AuthController::class, 'refreshToken']);
+
+    // Operator management routes (Admin/Manager only)
+    Route::prefix('operators')->group(function () {
+        Route::get('/', [AuthController::class, 'getOperators']);
+        Route::post('/', [AuthController::class, 'createOperator']);
+        Route::get('/{id}', [AuthController::class, 'getOperator']);
+        Route::put('/{id}', [AuthController::class, 'updateOperator']);
+        Route::post('/{id}/activate', [AuthController::class, 'activateOperator']);
+        Route::post('/{id}/deactivate', [AuthController::class, 'deactivateOperator']);
+        Route::post('/{id}/reset-password', [AuthController::class, 'resetOperatorPassword']);
+        Route::delete('/{id}', [AuthController::class, 'deleteOperator']);
+    });
+
+    // Roles
+    Route::get('/roles', [AuthController::class, 'getRoles']);
 
     // Station routes
     Route::apiResource('stations', StationController::class);
@@ -41,8 +61,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('customers', CustomerController::class);
     Route::get('customers/{customer}/statistics', [CustomerController::class, 'getStatistics']);
     Route::get('customers/active/list', [CustomerController::class, 'getActiveCustomers']);
-
-    
 });
 
 // Health check
