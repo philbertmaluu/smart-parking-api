@@ -1,61 +1,106 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Smart Parking System - Documentation
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Welcome to the Smart Parking System documentation. This documentation provides comprehensive information about the system's features, API endpoints, and usage.
 
-## About Laravel
+## 📚 Documentation Index
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+### 🔐 Authentication & Authorization
+- **[Authentication System](./AUTHENTICATION.md)** - Complete guide to user authentication, registration, and operator management
+- **[Roles & Permissions](./ROLES_AND_PERMISSIONS.md)** - Role-based access control and permission system
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+### 🏗️ API Documentation
+- **[API Overview](./API_OVERVIEW.md)** - General API information and conventions
+- **[Stations API](./STATIONS_API.md)** - Station management endpoints
+- **[Gates API](./GATES_API.md)** - Gate management endpoints
+- **[Vehicles API](./VEHICLES_API.md)** - Vehicle management endpoints
+- **[Customers API](./CUSTOMERS_API.md)** - Customer management endpoints
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### 🗄️ Database & Models
+- **[Database Schema](./DATABASE_SCHEMA.md)** - Complete database structure and relationships
+- **[Models Documentation](./MODELS.md)** - Eloquent models and their relationships
 
-## Learning Laravel
+### 🚀 Development Guide
+- **[Setup Guide](./SETUP.md)** - Installation and configuration instructions
+- **[Development Workflow](./DEVELOPMENT.md)** - Development best practices and guidelines
+- **[Testing Guide](./TESTING.md)** - Testing procedures and examples
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+### 📊 Features & Modules
+- **[Vehicle Passages](./VEHICLES_PASSAGES.md)** - Entry/exit tracking system
+- **[Transactions](./TRANSACTIONS.md)** - Payment processing and billing
+- **[Reports & Analytics](./REPORTS.md)** - Reporting and analytics features
+- **[System Settings](./SYSTEM_SETTINGS.md)** - System configuration management
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+## 🎯 Quick Start
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### 1. System Overview
+The Smart Parking System is a comprehensive toll management solution that includes:
+- **Station Management**: Manage toll stations and their configurations
+- **Gate Operations**: Control entry and exit gates
+- **Vehicle Tracking**: Monitor vehicle passages and transactions
+- **Customer Management**: Handle customer accounts and billing
+- **Reporting**: Generate comprehensive reports and analytics
 
-## Laravel Sponsors
+### 2. Key Features
+- ✅ **Role-based Access Control** - Secure user management with permissions
+- ✅ **Real-time Operations** - Live tracking of vehicle passages
+- ✅ **Flexible Pricing** - Configurable pricing based on vehicle types
+- ✅ **Comprehensive Reporting** - Detailed analytics and reports
+- ✅ **API-First Design** - RESTful API for easy integration
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### 3. Default Access
+After installation, you can access the system with these default credentials:
 
-### Premium Partners
+| Role | Email | Password |
+|------|-------|----------|
+| System Administrator | admin@smartparking.com | password123 |
+| Stations Manager | manager@smartparking.com | password123 |
+| Gate Operator | operator1@smartparking.com | password123 |
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+## 🔧 API Base URL
+```
+http://your-domain.com/api
+```
 
-## Contributing
+## 📋 API Response Format
+All API responses follow a consistent format:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```json
+{
+    "success": true,
+    "data": {...},
+    "messages": "Operation completed successfully",
+    "status": 200
+}
+```
 
-## Code of Conduct
+## 🛡️ Authentication
+Most API endpoints require authentication using Bearer tokens:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```http
+Authorization: Bearer YOUR_TOKEN_HERE
+```
 
-## Security Vulnerabilities
+## 📝 Contributing
+When adding new features or updating documentation:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+1. Update the relevant documentation file
+2. Add new documentation files to this index
+3. Include code examples and usage instructions
+4. Test all examples before committing
 
-## License
+## 📞 Support
+For technical support or questions:
+- Check the troubleshooting sections in each documentation file
+- Review the API error responses
+- Test with the provided examples
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## 🔄 Version History
+- **v1.0.0** - Initial release with core features
+- **v1.1.0** - Added authentication and role management
+- **v1.2.0** - Enhanced reporting and analytics
+
+---
+
+**Last Updated**: August 2025  
+**Version**: 1.2.0  
+**Maintainer**: Smart Parking System Team 
