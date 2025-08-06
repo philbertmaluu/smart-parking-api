@@ -11,9 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('parking_spots', function (Blueprint $table) {
+        Schema::create('permissions', function (Blueprint $table) {
             $table->id();
+            $table->string('name')->unique();
+            $table->string('guard')->nullable();
+            $table->text('description')->nullable();
             $table->timestamps();
+            $table->softDeletes();
+
+            // Indexes
+            $table->index('name');
+            $table->index('guard');
         });
     }
 
@@ -22,6 +30,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('parking_spots');
+        Schema::dropIfExists('permissions');
     }
 };
