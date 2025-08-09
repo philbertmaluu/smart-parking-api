@@ -19,11 +19,9 @@ class PaymentTypeRequest extends FormRequest
      */
     public function rules(): array
     {
-        $paymentTypeId = $this->route('payment_type');
-        $nameRule = $paymentTypeId ? "unique:payment_types,name,{$paymentTypeId}" : 'unique:payment_types,name';
 
         return [
-            'name' => "required|string|max:100|{$nameRule}",
+            'name' => "required|string|max:100|unique:payment_types,name",
             'description' => 'nullable|string|max:500',
             'is_active' => 'boolean',
         ];

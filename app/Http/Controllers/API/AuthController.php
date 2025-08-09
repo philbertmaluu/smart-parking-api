@@ -66,6 +66,8 @@ class AuthController extends BaseController
         try {
             $credentials = $request->validated();
 
+
+
             if (!Auth::attempt($credentials)) {
                 return $this->sendError('Invalid credentials', [], 401);
             }

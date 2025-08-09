@@ -26,7 +26,6 @@ class BundleTypeRequest extends FormRequest
             'name' => "required|string|max:100|{$nameRule}",
             'description' => 'nullable|string|max:500',
             'duration_days' => 'required|integer|min:1|max:365',
-            'price' => 'required|numeric|min:0',
             'is_active' => 'boolean',
         ];
     }
@@ -45,9 +44,6 @@ class BundleTypeRequest extends FormRequest
             'duration_days.integer' => 'Duration must be a valid number.',
             'duration_days.min' => 'Duration must be at least 1 day.',
             'duration_days.max' => 'Duration cannot exceed 365 days.',
-            'price.required' => 'Price is required.',
-            'price.numeric' => 'Price must be a valid number.',
-            'price.min' => 'Price cannot be negative.',
         ];
     }
 
@@ -60,7 +56,6 @@ class BundleTypeRequest extends FormRequest
             'name' => 'bundle type name',
             'description' => 'description',
             'duration_days' => 'duration in days',
-            'price' => 'price',
         ];
     }
 }

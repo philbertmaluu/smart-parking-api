@@ -20,11 +20,12 @@ class VehicleBodyTypeRequest extends FormRequest
     public function rules(): array
     {
         $bodyTypeId = $this->route('vehicle_body_type');
-        $nameRule = $bodyTypeId ? "unique:vehicle_body_types,name,{$bodyTypeId}" : 'unique:vehicle_body_types,name';
+
 
         return [
-            'name' => "required|string|max:100|{$nameRule}",
+            'name' => "required|string|max:100|unique:vehicle_body_types,name",
             'description' => 'nullable|string|max:500',
+            'category' => 'nullable|string|max:50|in:light,medium,heavy',
             'is_active' => 'boolean',
         ];
     }
@@ -39,6 +40,8 @@ class VehicleBodyTypeRequest extends FormRequest
             'name.unique' => 'Vehicle body type name must be unique.',
             'name.max' => 'Vehicle body type name cannot exceed 100 characters.',
             'description.max' => 'Description cannot exceed 500 characters.',
+            'category.in' => 'Category must be one of: light, medium, heavy.',
+            'category.max' => 'Category cannot exceed 50 characters.',
         ];
     }
 
@@ -50,6 +53,7 @@ class VehicleBodyTypeRequest extends FormRequest
         return [
             'name' => 'vehicle body type name',
             'description' => 'description',
+            'category' => 'category',
         ];
     }
 }

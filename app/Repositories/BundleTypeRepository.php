@@ -193,4 +193,23 @@ class BundleTypeRepository
             ->limit($limit)
             ->get();
     }
+
+    /**
+     * Toggle the active status of a bundle type by ID
+     *
+     * @param int $id
+     * @return BundleType|null
+     */
+    public function toggleBundleTypeStatus(int $id): ?BundleType
+    {
+        $bundleType = $this->model->find($id);
+        if (!$bundleType) {
+            return null;
+        }
+
+        $bundleType->is_active = !$bundleType->is_active;
+        $bundleType->save();
+
+        return $bundleType->fresh();
+    }
 }
