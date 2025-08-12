@@ -187,4 +187,69 @@ class VehicleRepository
             $query->where('entry_time', '>=', now()->subDays($days));
         }])->registered()->get();
     }
+
+    /**
+     * Search vehicle by plate number
+     *
+     * @param string $plateNumber
+     * @return Vehicle|null
+     */
+    public function searchByPlateNumber(string $plateNumber): ?Vehicle
+    {
+        return $this->model->where('plate_number', 'like', "%{$plateNumber}%")
+            ->with(['bodyType'])
+            ->first();
+    }
+
+    /**
+     * Lookup vehicle by exact plate number
+     *
+     * @param string $plateNumber
+     * @return Vehicle|null
+     */
+    public function lookupByPlateNumber(string $plateNumber): ?Vehicle
+    {
+        return $this->model->where('plate_number', $plateNumber)
+            ->with(['bodyType'])
+            ->first();
+    }
+
+    /**
+     * Get all registered vehicles
+     *
+     * @return Collection
+     */
+    public function getRegisteredVehicles(): Collection
+    {
+        return $this->model->registered()
+            ->with(['bodyType'])
+            ->orderBy('plate_number')
+            ->get();
+    }
+
+    /**
+     * Get all unregistered vehicles
+     *
+     * @return Collection
+     */
+    public function getUnregisteredVehicles(): Collection
+    {
+        return $this->model->where('is_registered', false)
+            ->with(['bodyType'])
+            ->orderBy('plate_number')
+            ->get();
+    }
+
+    /**
+     * Get active vehicles list (for dropdown/select)
+     *
+     * @return Collection
+     */
+    public function getActiveVehiclesList(): Collection
+    {
+        return $this->model->select('id', 'plate_number', 'make', 'model', 'body_type_id', 'is_registered')
+            ->with('bodyType:id,name')
+            ->orderBy('plate_number')
+            ->get();
+    }
 }

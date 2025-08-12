@@ -9,6 +9,8 @@ use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\VehicleBodyTypeController;
 use App\Http\Controllers\API\PaymentTypeController;
 use App\Http\Controllers\API\BundleTypeController;
+use App\Http\Controllers\API\VehiclePassageController;
+use App\Http\Controllers\API\GateControlController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -56,10 +58,14 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('gates/type/both', [GateController::class, 'getBothGates']);
 
         // Vehicle routes
+        Route::get('vehicles/search/plate/{plateNumber}', [VehicleController::class, 'searchByPlate']);
+        Route::get('vehicles/lookup/{plateNumber}', [VehicleController::class, 'lookupByPlate']);
+        Route::get('vehicles/active/list', [VehicleController::class, 'getActiveVehiclesList']);
+        Route::get('vehicles/body-type/{bodyTypeId}', [VehicleController::class, 'getVehiclesByBodyType']);
+        Route::get('vehicles/registered/list', [VehicleController::class, 'getRegisteredVehicles']);
+        Route::get('vehicles/unregistered/list', [VehicleController::class, 'getUnregisteredVehicles']);
         Route::apiResource('vehicles', VehicleController::class);
         Route::get('vehicles/{vehicle}/statistics', [VehicleController::class, 'getStatistics']);
-        Route::get('vehicles/active/list', [VehicleController::class, 'getActiveVehicles']);
-        Route::get('vehicles/body-type/{bodyTypeId}', [VehicleController::class, 'getVehiclesByBodyType']);
 
         // Customer routes
         Route::apiResource('customers', CustomerController::class);
@@ -89,6 +95,31 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('bundle-types/duration/{durationDays}', [BundleTypeController::class, 'getByDuration']);
         Route::get('bundle-types/with-bundle-count', [BundleTypeController::class, 'getWithBundleCount']);
         Route::get('bundle-types/popular', [BundleTypeController::class, 'getPopular']);
+
+        // Vehicle Passage routes
+        Route::apiResource('vehicle-passages', VehiclePassageController::class);
+        Route::post('vehicle-passages/entry', [VehiclePassageController::class, 'processEntry']);
+        Route::post('vehicle-passages/exit', [VehiclePassageController::class, 'processExit']);
+        Route::post('vehicle-passages/quick-lookup', [VehiclePassageController::class, 'quickLookup']);
+        Route::get('vehicle-passages/passage/{passageNumber}', [VehiclePassageController::class, 'getByPassageNumber']);
+        Route::get('vehicle-passages/vehicle/{vehicleId}', [VehiclePassageController::class, 'getByVehicle']);
+        Route::get('vehicle-passages/station/{stationId}', [VehiclePassageController::class, 'getByStation']);
+        Route::get('vehicle-passages/active/list', [VehiclePassageController::class, 'getActivePassages']);
+        Route::get('vehicle-passages/completed/list', [VehiclePassageController::class, 'getCompletedPassages']);
+        Route::get('vehicle-passages/statistics', [VehiclePassageController::class, 'getStatistics']);
+        Route::put('vehicle-passages/{id}/status', [VehiclePassageController::class, 'updateStatus']);
+        Route::get('vehicle-passages/search', [VehiclePassageController::class, 'search']);
+
+        // Gate Control routes
+        Route::post('gate-control/plate-detection', [GateControlController::class, 'processPlateDetection']);
+        Route::post('gate-control/quick-lookup', [GateControlController::class, 'quickLookup']);
+        Route::post('gate-control/manual', [GateControlController::class, 'manualControl']);
+        Route::post('gate-control/emergency', [GateControlController::class, 'emergencyControl']);
+        Route::get('gate-control/gates/{gateId}/status', [GateControlController::class, 'getGateStatus']);
+        Route::get('gate-control/gates/active', [GateControlController::class, 'getActiveGates']);
+        Route::get('gate-control/gates/{gateId}/history', [GateControlController::class, 'getGateControlHistory']);
+        Route::get('gate-control/gates/{gateId}/test-connection', [GateControlController::class, 'testGateConnection']);
+        Route::get('gate-control/monitoring-dashboard', [GateControlController::class, 'getMonitoringDashboard']);
     });
 
     // Health check

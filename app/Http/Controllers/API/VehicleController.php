@@ -123,18 +123,7 @@ class VehicleController extends BaseController
         }
     }
 
-    /**
-     * Get vehicles by body type for dropdown
-     */
-    public function getVehiclesByBodyType($bodyTypeId)
-    {
-        try {
-            $vehicles = $this->vehicleRepository->getVehiclesByBodyTypeForSelect($bodyTypeId);
-            return $this->sendResponse($vehicles, 'Vehicles retrieved successfully');
-        } catch (\Exception $e) {
-            return $this->sendError('Error retrieving vehicles', $e->getMessage(), 500);
-        }
-    }
+
 
     /**
      * Get vehicle statistics
@@ -154,6 +143,94 @@ class VehicleController extends BaseController
             return $this->sendResponse($statistics, 'Vehicle statistics retrieved successfully');
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving vehicle statistics', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Search vehicle by plate number
+     */
+    public function searchByPlate($plateNumber)
+    {
+        try {
+            $vehicle = $this->vehicleRepository->searchByPlateNumber($plateNumber);
+
+            if (!$vehicle) {
+                return $this->sendError('Vehicle not found', [], 404);
+            }
+
+            return $this->sendResponse($vehicle, 'Vehicle found successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error searching vehicle', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Lookup vehicle by exact plate number
+     */
+    public function lookupByPlate($plateNumber)
+    {
+        try {
+            $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
+
+            if (!$vehicle) {
+                return $this->sendError('Vehicle not found', [], 404);
+            }
+
+            return $this->sendResponse($vehicle, 'Vehicle found successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error looking up vehicle', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get active vehicles list
+     */
+    public function getActiveVehiclesList()
+    {
+        try {
+            $vehicles = $this->vehicleRepository->getActiveVehiclesList();
+            return $this->sendResponse($vehicles, 'Active vehicles list retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving active vehicles list', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get vehicles by body type
+     */
+    public function getVehiclesByBodyType($bodyTypeId)
+    {
+        try {
+            $vehicles = $this->vehicleRepository->getVehiclesByBodyType($bodyTypeId);
+            return $this->sendResponse($vehicles, 'Vehicles retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving vehicles by body type', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get registered vehicles list
+     */
+    public function getRegisteredVehicles()
+    {
+        try {
+            $vehicles = $this->vehicleRepository->getRegisteredVehicles();
+            return $this->sendResponse($vehicles, 'Registered vehicles retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving registered vehicles', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get unregistered vehicles list
+     */
+    public function getUnregisteredVehicles()
+    {
+        try {
+            $vehicles = $this->vehicleRepository->getUnregisteredVehicles();
+            return $this->sendResponse($vehicles, 'Unregistered vehicles retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving unregistered vehicles', $e->getMessage(), 500);
         }
     }
 }
