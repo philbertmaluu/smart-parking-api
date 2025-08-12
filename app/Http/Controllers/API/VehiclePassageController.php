@@ -136,7 +136,7 @@ class VehiclePassageController extends BaseController
     }
 
     /**
-     * Process vehicle entry with plate number detection
+     * Process vehicle entry with plate number detection and payment
      */
     public function processEntry(Request $request)
     {
@@ -156,6 +156,9 @@ class VehiclePassageController extends BaseController
                 'is_exempted' => 'nullable|boolean',
                 'exemption_reason' => 'nullable|string|max:255',
                 'notes' => 'nullable|string|max:500',
+                'payment_method' => 'nullable|string|max:50',
+                'payment_amount' => 'nullable|numeric|min:0',
+                'receipt_notes' => 'nullable|string|max:500',
             ]);
 
             $result = $this->passageService->processVehicleEntry(

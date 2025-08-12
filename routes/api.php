@@ -11,6 +11,7 @@ use App\Http\Controllers\API\PaymentTypeController;
 use App\Http\Controllers\API\BundleTypeController;
 use App\Http\Controllers\API\VehiclePassageController;
 use App\Http\Controllers\API\GateControlController;
+use App\Http\Controllers\API\ReceiptController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -120,6 +121,18 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('gate-control/gates/{gateId}/history', [GateControlController::class, 'getGateControlHistory']);
         Route::get('gate-control/gates/{gateId}/test-connection', [GateControlController::class, 'testGateConnection']);
         Route::get('gate-control/monitoring-dashboard', [GateControlController::class, 'getMonitoringDashboard']);
+
+        // Receipt routes
+        Route::apiResource('receipts', ReceiptController::class);
+        Route::get('receipts/number/{receiptNumber}', [ReceiptController::class, 'getByReceiptNumber']);
+        Route::get('receipts/vehicle-passage/{vehiclePassageId}', [ReceiptController::class, 'getByVehiclePassage']);
+        Route::get('receipts/statistics', [ReceiptController::class, 'getStatistics']);
+        Route::get('receipts/recent', [ReceiptController::class, 'getRecentReceipts']);
+        Route::get('receipts/total-revenue', [ReceiptController::class, 'getTotalRevenue']);
+        Route::get('receipts/search', [ReceiptController::class, 'search']);
+        Route::get('receipts/print/{id}', [ReceiptController::class, 'printReceipt']);
+        Route::get('receipts/by-date-range', [ReceiptController::class, 'getByDateRange']);
+        Route::get('receipts/by-payment-method', [ReceiptController::class, 'getByPaymentMethod']);
     });
 
     // Health check

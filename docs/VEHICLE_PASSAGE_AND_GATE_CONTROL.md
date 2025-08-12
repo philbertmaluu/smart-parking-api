@@ -36,18 +36,20 @@ The system follows a service-based architecture with the following components:
 
 ### Core Features
 
-#### 1. Entry Processing
+#### 1. Entry Processing with Payment
 - Automatic vehicle creation if not exists
 - Account and bundle subscription detection
 - Pricing calculation
+- Payment processing at entry
+- Receipt generation
 - Passage type determination (toll/free/exempted)
 - Gate action determination
 
 #### 2. Exit Processing
 - Active passage validation
 - Duration calculation
-- Final pricing calculation
-- Payment status verification
+- No payment required (already paid at entry)
+- Gate action based on existing receipt
 
 #### 3. Passage Types
 - **Toll**: Standard paid passage
@@ -76,6 +78,44 @@ The system follows a service-based architecture with the following components:
 | GET | `/vehicle-passages/statistics` | Get passage statistics |
 | PUT | `/vehicle-passages/{id}/status` | Update passage status |
 | GET | `/vehicle-passages/search` | Search passages |
+
+## Receipt Management System
+
+### Core Features
+
+#### 1. Automatic Receipt Generation
+- Generated automatically when payment is processed at entry
+- Unique receipt numbers (RCPT + date + random string)
+- Links to vehicle passage and payment details
+- Printable format for physical receipts
+
+#### 2. Receipt Operations
+- View receipt details
+- Search receipts by number or vehicle
+- Get receipts by date range
+- Get receipts by payment method
+- Receipt statistics and reporting
+- Print receipt functionality
+
+### API Endpoints
+
+#### Receipts
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/receipts` | List all receipts with filters |
+| GET | `/receipts/{id}` | Get receipt details |
+| PUT | `/receipts/{id}` | Update receipt |
+| DELETE | `/receipts/{id}` | Delete receipt |
+| GET | `/receipts/number/{number}` | Get by receipt number |
+| GET | `/receipts/vehicle-passage/{id}` | Get receipts by vehicle passage |
+| GET | `/receipts/statistics` | Get receipt statistics |
+| GET | `/receipts/recent` | Get recent receipts |
+| GET | `/receipts/total-revenue` | Get total revenue |
+| GET | `/receipts/search` | Search receipts |
+| GET | `/receipts/print/{id}` | Get printable receipt data |
+| GET | `/receipts/by-date-range` | Get receipts by date range |
+| GET | `/receipts/by-payment-method` | Get receipts by payment method |
 
 ## Gate Control System
 
@@ -115,7 +155,7 @@ The system follows a service-based architecture with the following components:
 
 ## Usage Examples
 
-### 1. Vehicle Entry Processing
+### 1. Vehicle Entry Processing with Payment
 
 ```bash
 curl -X POST /api/toll-v1/vehicle-passages/entry \
@@ -133,7 +173,10 @@ curl -X POST /api/toll-v1/vehicle-passages/entry \
     "account_id": 1,
     "payment_type_id": 1,
     "passage_type": "toll",
-    "notes": "Regular customer"
+    "payment_method": "cash",
+    "payment_amount": 10.00,
+    "receipt_notes": "Regular customer",
+    "notes": "Entry with payment"
   }'
 ```
 
@@ -157,7 +200,17 @@ curl -X POST /api/toll-v1/vehicle-passages/entry \
     "passage_type": "toll",
     "status": "active"
   },
-  "gate_action": "open"
+  "gate_action": "open",
+  "receipt": {
+    "id": 1,
+    "receipt_number": "RCPT20241201123456",
+    "vehicle_passage_id": 1,
+    "amount": 10.00,
+    "payment_method": "cash",
+    "issued_by": 1,
+    "issued_at": "2024-12-01T12:34:56Z",
+    "notes": "Regular customer"
+  }
 }
 ```
 
@@ -228,6 +281,53 @@ curl -X POST /api/toll-v1/gate-control/emergency \
   }'
 ```
 
+### 5. Receipt Operations
+
+#### Get Receipt by Number
+```bash
+curl -X GET /api/toll-v1/receipts/number/RCPT20241201123456 \
+  -H "Authorization: Bearer {token}"
+```
+
+#### Print Receipt
+```bash
+curl -X GET /api/toll-v1/receipts/print/1 \
+  -H "Authorization: Bearer {token}"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Printable receipt data generated successfully",
+  "data": {
+    "receipt_number": "RCPT20241201123456",
+    "issued_at": "2024-12-01 12:34:56",
+    "amount": 10.00,
+    "payment_method": "cash",
+    "vehicle": {
+      "plate_number": "ABC123",
+      "make": "Toyota",
+      "model": "Camry",
+      "body_type": "Sedan"
+    },
+    "station": {
+      "name": "Main Station",
+      "gate": "Entry Gate 1"
+    },
+    "operator": "John Operator",
+    "notes": "Regular customer",
+    "passage_number": "PASS20241201123456"
+  }
+}
+```
+
+#### Get Receipt Statistics
+```bash
+curl -X GET "/api/toll-v1/receipts/statistics?start_date=2024-12-01&end_date=2024-12-31" \
+  -H "Authorization: Bearer {token}"
+```
+
 ## Gate Control Logic
 
 ### Entry Gate Logic
@@ -241,8 +341,8 @@ curl -X POST /api/toll-v1/gate-control/emergency \
 
 1. **Plate Detection** → Vehicle lookup
 2. **Active Passage Check** → Deny if no active passage
-3. **Payment Verification** → Check payment status
-4. **Gate Action** → Open if paid/account, require payment if cash
+3. **Receipt Verification** → Check if receipt exists (payment already made at entry)
+4. **Gate Action** → Open if receipt exists, deny if no receipt
 
 ### Pricing Logic
 

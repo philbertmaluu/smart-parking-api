@@ -4,8 +4,10 @@ namespace App\Services;
 
 use App\Repositories\VehiclePassageRepository;
 use App\Repositories\VehicleRepository;
+use App\Repositories\ReceiptRepository;
 use App\Models\Vehicle;
 use App\Models\VehiclePassage;
+use App\Models\Receipt;
 use App\Models\Gate;
 use App\Models\Station;
 use App\Models\Account;
@@ -19,13 +21,16 @@ class VehiclePassageService
 {
     protected $passageRepository;
     protected $vehicleRepository;
+    protected $receiptRepository;
 
     public function __construct(
         VehiclePassageRepository $passageRepository,
-        VehicleRepository $vehicleRepository
+        VehicleRepository $vehicleRepository,
+        ReceiptRepository $receiptRepository
     ) {
         $this->passageRepository = $passageRepository;
         $this->vehicleRepository = $vehicleRepository;
+        $this->receiptRepository = $receiptRepository;
     }
 
     /**
@@ -84,6 +89,12 @@ class VehiclePassageService
 
             $passage = $this->passageRepository->createPassageEntry($passageData);
 
+            // Handle payment and receipt generation
+            $receipt = null;
+            if ($passage->total_amount > 0 && $passage->passage_type === 'toll') {
+                $receipt = $this->processPaymentAndGenerateReceipt($passage, $additionalData, $operatorId);
+            }
+
             // Determine gate action
             $gateAction = $this->determineGateAction($passage, $accountInfo);
 
@@ -102,9 +113,9 @@ class VehiclePassageService
                 'data' => $passage,
                 'gate_action' => $gateAction,
                 'vehicle' => $vehicle,
-                'account_info' => $accountInfo
+                'account_info' => $accountInfo,
+                'receipt' => $receipt
             ];
-
         } catch (Exception $e) {
             DB::rollBack();
             Log::error('Error processing vehicle entry', [
@@ -192,7 +203,6 @@ class VehiclePassageService
                 'gate_action' => $gateAction,
                 'vehicle' => $vehicle
             ];
-
         } catch (Exception $e) {
             DB::rollBack();
             Log::error('Error processing vehicle exit', [
@@ -248,7 +258,6 @@ class VehiclePassageService
                 ],
                 'gate_action' => $gateAction
             ];
-
         } catch (Exception $e) {
             Log::error('Error in quick plate lookup', [
                 'plate_number' => $plateNumber,
@@ -489,5 +498,57 @@ class VehiclePassageService
             'data' => $passages,
             'count' => $passages->count()
         ];
+    }
+
+    /**
+     * Process payment and generate receipt
+     *
+     * @param VehiclePassage $passage
+     * @param array $additionalData
+     * @param int $operatorId
+     * @return Receipt|null
+     */
+    private function processPaymentAndGenerateReceipt(VehiclePassage $passage, array $additionalData, int $operatorId): ?Receipt
+    {
+        try {
+            // Validate payment data
+            if (!isset($additionalData['payment_method'])) {
+                throw new Exception('Payment method is required for toll passages');
+            }
+
+            // Validate payment amount
+            $paymentAmount = $additionalData['payment_amount'] ?? $passage->total_amount;
+            if ($paymentAmount < $passage->total_amount) {
+                throw new Exception('Payment amount is insufficient');
+            }
+
+            // Create receipt
+            $receiptData = [
+                'payment_method' => $additionalData['payment_method'],
+                'issued_by' => $operatorId,
+                'issued_at' => now(),
+                'notes' => $additionalData['receipt_notes'] ?? null,
+            ];
+
+            $receipt = $this->receiptRepository->createReceiptForPassage($passage, $receiptData);
+
+            Log::info('Receipt generated for vehicle passage', [
+                'passage_id' => $passage->id,
+                'receipt_id' => $receipt->id,
+                'receipt_number' => $receipt->receipt_number,
+                'amount' => $receipt->amount,
+                'payment_method' => $receipt->payment_method,
+                'operator_id' => $operatorId
+            ]);
+
+            return $receipt;
+        } catch (Exception $e) {
+            Log::error('Error processing payment and generating receipt', [
+                'passage_id' => $passage->id,
+                'error' => $e->getMessage()
+            ]);
+
+            throw $e;
+        }
     }
 }
