@@ -219,7 +219,7 @@ class GateControlController extends BaseController
 
             if ($result['success']) {
                 $data = $result['data'];
-                
+
                 // Simulate gate connection test
                 $connectionStatus = [
                     'gate_id' => $gateId,
@@ -247,13 +247,13 @@ class GateControlController extends BaseController
         try {
             // Get active gates
             $activeGatesResult = $this->gateControlService->getActiveGates();
-            
+
             if (!$activeGatesResult['success']) {
                 return $this->sendError('Error retrieving active gates', null, 500);
             }
 
             $activeGates = $activeGatesResult['data'];
-            
+
             // Get gate statuses
             $gateStatuses = [];
             foreach ($activeGates as $gate) {

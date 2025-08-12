@@ -48,7 +48,6 @@ class GateControlService
             } else {
                 return $this->createResponse(false, 'Invalid direction specified', 'deny');
             }
-
         } catch (Exception $e) {
             Log::error('Error in plate detection processing', [
                 'plate_number' => $plateNumber,
@@ -91,7 +90,7 @@ class GateControlService
 
         // Determine gate action
         $gateAction = $this->determineGateAction($result['gate_action'], $gate);
-        
+
         // Log the action
         $this->logGateAction($gate, $plateNumber, 'entry', $gateAction, $result);
 
@@ -128,7 +127,7 @@ class GateControlService
 
         // Determine gate action
         $gateAction = $this->determineGateAction($result['gate_action'], $gate);
-        
+
         // Log the action
         $this->logGateAction($gate, $plateNumber, 'exit', $gateAction, $result);
 
@@ -176,7 +175,6 @@ class GateControlService
             $gateAction = $this->determineQuickLookupGateAction($result, $direction);
 
             return $this->createResponse(true, $result['message'], $gateAction, $result['data']);
-
         } catch (Exception $e) {
             Log::error('Error in quick plate lookup', [
                 'plate_number' => $plateNumber,
@@ -234,7 +232,6 @@ class GateControlService
             ], 60); // Cache for 1 minute
 
             return $this->createResponse(true, "Gate {$action} command sent successfully", $action);
-
         } catch (Exception $e) {
             Log::error('Error in manual gate control', [
                 'gate_id' => $gateId,
@@ -274,7 +271,6 @@ class GateControlService
             ];
 
             return $this->createResponse(true, 'Gate status retrieved successfully', null, $status);
-
         } catch (Exception $e) {
             Log::error('Error getting gate status', [
                 'gate_id' => $gateId,
@@ -395,7 +391,6 @@ class GateControlService
                 ->get();
 
             return $this->createResponse(true, 'Active gates retrieved successfully', null, $gates);
-
         } catch (Exception $e) {
             Log::error('Error getting active gates', [
                 'error' => $e->getMessage()
@@ -443,7 +438,6 @@ class GateControlService
             ], 300); // Cache for 5 minutes
 
             return $this->createResponse(true, "Emergency gate {$action} command sent successfully", $action);
-
         } catch (Exception $e) {
             Log::error('Error in emergency gate control', [
                 'gate_id' => $gateId,
