@@ -223,7 +223,7 @@ class VehiclePassageRepository
             'exitStation'
         ])->where(function ($query) use ($stationId) {
             $query->where('entry_station_id', $stationId)
-                  ->orWhere('exit_station_id', $stationId);
+                ->orWhere('exit_station_id', $stationId);
         })->orderBy('entry_time', 'desc')->paginate($perPage);
     }
 
@@ -267,9 +267,9 @@ class VehiclePassageRepository
             'exitStation'
         ])->where(function ($query) use ($search) {
             $query->where('passage_number', 'like', "%{$search}%")
-                  ->orWhereHas('vehicle', function ($q) use ($search) {
-                      $q->where('plate_number', 'like', "%{$search}%");
-                  });
+                ->orWhereHas('vehicle', function ($q) use ($search) {
+                    $q->where('plate_number', 'like', "%{$search}%");
+                });
         })->orderBy('entry_time', 'desc')->paginate($perPage);
     }
 
@@ -368,7 +368,7 @@ class VehiclePassageRepository
         $discountAmount = 0;
 
         if ($vehicle && $vehicle->bodyType) {
-            $price = VehicleBodyTypePrice::where('vehicle_body_type_id', $vehicle->body_type_id)
+            $price = VehicleBodyTypePrice::where('body_type_id', $vehicle->body_type_id)
                 ->where('station_id', $data['entry_station_id'])
                 ->first();
 
