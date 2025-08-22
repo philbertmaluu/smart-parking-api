@@ -52,7 +52,7 @@ class VehiclePassageService
 
             // Get gate and station information
             $gate = Gate::with('station')->findOrFail($gateId);
-
+            
             // Check if vehicle already has an active passage
             $activePassage = $this->passageRepository->getActivePassageByVehicle($vehicle->id);
             if ($activePassage) {

@@ -12,6 +12,7 @@ use App\Http\Controllers\API\BundleTypeController;
 use App\Http\Controllers\API\VehiclePassageController;
 use App\Http\Controllers\API\GateControlController;
 use App\Http\Controllers\API\ReceiptController;
+use App\Http\Controllers\API\CameraController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -133,7 +134,28 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('receipts/print/{id}', [ReceiptController::class, 'printReceipt']);
         Route::get('receipts/by-date-range', [ReceiptController::class, 'getByDateRange']);
         Route::get('receipts/by-payment-method', [ReceiptController::class, 'getByPaymentMethod']);
+
+        // Camera routes
+        Route::get('camera/stream', [CameraController::class, 'index']);
+        Route::get('stream/snapshot/{cameraId?}', [CameraController::class, 'snapshot']);
+        Route::get('stream/mjpeg/{cameraId?}', [CameraController::class, 'mjpegStream']);
+        Route::get('stream/optimized/{cameraId?}', [CameraController::class, 'optimizedStream']);
+        Route::get('stream/hls/{cameraId?}', [CameraController::class, 'hlsStream']);
+        Route::get('stream/hls/{cameraId}/{segment}', [CameraController::class, 'hlsSegment']);
+        Route::post('stream/hls/{cameraId?}/stop', [CameraController::class, 'stopHlsStream']);
+        Route::get('camera/test-connection', [CameraController::class, 'testConnection']);
+        Route::get('camera/status/{cameraId?}', [CameraController::class, 'getStatus']);
     });
+
+    // Public camera endpoints for testing
+    Route::get('camera/status/{cameraId?}', [CameraController::class, 'getStatus']);
+    Route::get('camera/test-connection', [CameraController::class, 'testConnection']);
+    Route::get('stream/snapshot/{cameraId?}', [CameraController::class, 'snapshot']);
+    Route::get('stream/mjpeg/{cameraId?}', [CameraController::class, 'mjpegStream']);
+    Route::get('stream/optimized/{cameraId?}', [CameraController::class, 'optimizedStream']);
+    Route::get('stream/hls/{cameraId?}', [CameraController::class, 'hlsStream']);
+    Route::get('stream/hls/{cameraId}/{segment}', [CameraController::class, 'hlsSegment']);
+    Route::post('stream/hls/{cameraId?}/stop', [CameraController::class, 'stopHlsStream']);
 
     // Health check
     Route::get('/health', function () {

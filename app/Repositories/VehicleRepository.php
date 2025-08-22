@@ -66,7 +66,8 @@ class VehicleRepository
      */
     public function createVehicle(array $data): Vehicle
     {
-        return $this->model->create($data);
+        $vehicle = $this->model->create($data);
+        return $vehicle->load('bodyType');
     }
 
     /**
