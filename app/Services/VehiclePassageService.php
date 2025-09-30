@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Repositories\VehiclePassageRepository;
 use App\Repositories\VehicleRepository;
 use App\Repositories\ReceiptRepository;
+use App\Services\PricingService;
 use App\Models\Vehicle;
 use App\Models\VehiclePassage;
 use App\Models\Receipt;
@@ -22,15 +23,18 @@ class VehiclePassageService
     protected $passageRepository;
     protected $vehicleRepository;
     protected $receiptRepository;
+    protected $pricingService;
 
     public function __construct(
         VehiclePassageRepository $passageRepository,
         VehicleRepository $vehicleRepository,
-        ReceiptRepository $receiptRepository
+        ReceiptRepository $receiptRepository,
+        PricingService $pricingService
     ) {
         $this->passageRepository = $passageRepository;
         $this->vehicleRepository = $vehicleRepository;
         $this->receiptRepository = $receiptRepository;
+        $this->pricingService = $pricingService;
     }
 
     /**
@@ -52,7 +56,7 @@ class VehiclePassageService
 
             // Get gate and station information
             $gate = Gate::with('station')->findOrFail($gateId);
-            
+
             // Check if vehicle already has an active passage
             $activePassage = $this->passageRepository->getActivePassageByVehicle($vehicle->id);
             if ($activePassage) {
@@ -65,25 +69,26 @@ class VehiclePassageService
                 ];
             }
 
-            // Determine account and bundle subscription
-            $accountInfo = $this->determineAccountAndBundle($vehicle, $additionalData);
+            // Get account information
+            $account = $this->getAccountForVehicle($vehicle, $additionalData);
 
-            // Determine payment type
-            $paymentType = $this->determinePaymentType($accountInfo, $additionalData);
+            // Calculate pricing using PricingService
+            $pricing = $this->pricingService->calculatePricing($vehicle, $gate->station, $account);
 
-            // Create passage entry
+            // Create passage entry with pricing information
             $passageData = [
                 'vehicle_id' => $vehicle->id,
-                'account_id' => $accountInfo['account_id'],
-                'bundle_subscription_id' => $accountInfo['bundle_subscription_id'],
-                'payment_type_id' => $paymentType->id,
+                'account_id' => $account?->id,
+                'bundle_subscription_id' => $pricing['bundle_subscription_id'] ?? null,
+                'payment_type_id' => $pricing['payment_type_id'],
                 'entry_time' => now(),
                 'entry_operator_id' => $operatorId,
                 'entry_gate_id' => $gateId,
                 'entry_station_id' => $gate->station_id,
-                'passage_type' => $this->determinePassageType($accountInfo, $additionalData),
-                'is_exempted' => $this->isExempted($accountInfo, $additionalData),
-                'exemption_reason' => $additionalData['exemption_reason'] ?? null,
+                'passage_type' => $this->determinePassageTypeFromPricing($pricing),
+                'base_amount' => $pricing['base_amount'],
+                'discount_amount' => $pricing['discount_amount'],
+                'total_amount' => $pricing['total_amount'],
                 'notes' => $additionalData['notes'] ?? null,
             ];
 
@@ -96,7 +101,7 @@ class VehiclePassageService
             }
 
             // Determine gate action
-            $gateAction = $this->determineGateAction($passage, $accountInfo);
+            $gateAction = $this->determineGateAction($passage, $pricing);
 
             DB::commit();
 
@@ -104,7 +109,8 @@ class VehiclePassageService
                 'plate_number' => $plateNumber,
                 'passage_id' => $passage->id,
                 'gate_action' => $gateAction,
-                'operator_id' => $operatorId
+                'operator_id' => $operatorId,
+                'pricing' => $pricing
             ]);
 
             return [
@@ -113,7 +119,7 @@ class VehiclePassageService
                 'data' => $passage,
                 'gate_action' => $gateAction,
                 'vehicle' => $vehicle,
-                'account_info' => $accountInfo,
+                'pricing' => $pricing,
                 'receipt' => $receipt
             ];
         } catch (Exception $e) {
@@ -242,8 +248,8 @@ class VehiclePassageService
             // Check for active passage
             $activePassage = $this->passageRepository->getActivePassageByVehicle($vehicle->id);
 
-            // Determine account and bundle info
-            $accountInfo = $this->determineAccountAndBundle($vehicle);
+            // Get account information (only for bundle subscribers)
+            $account = $this->getAccountForVehicle($vehicle);
 
             // Determine gate action
             $gateAction = $activePassage ? 'deny' : 'allow';
@@ -254,7 +260,8 @@ class VehiclePassageService
                 'data' => [
                     'vehicle' => $vehicle,
                     'active_passage' => $activePassage,
-                    'account_info' => $accountInfo
+                    'account' => $account,
+                    'has_bundle_subscription' => $account !== null
                 ],
                 'gate_action' => $gateAction
             ];
@@ -303,144 +310,41 @@ class VehiclePassageService
         return $vehicle;
     }
 
-    /**
-     * Determine account and bundle subscription for vehicle
-     *
-     * @param Vehicle $vehicle
-     * @param array $additionalData
-     * @return array
-     */
-    private function determineAccountAndBundle(Vehicle $vehicle, array $additionalData = []): array
-    {
-        $accountId = null;
-        $bundleSubscriptionId = null;
 
-        // Check if account_id is provided in additional data
-        if (isset($additionalData['account_id'])) {
-            $accountId = $additionalData['account_id'];
-        } else {
-            // Try to find account by vehicle
-            $accountVehicle = $vehicle->accountVehicles()->where('is_primary', true)->first();
-            if ($accountVehicle) {
-                $accountId = $accountVehicle->account_id;
-            }
-        }
-
-        // Check for active bundle subscription
-        if ($accountId) {
-            $bundleSubscription = BundleSubscription::where('account_id', $accountId)
-                ->where('status', 'active')
-                ->where('start_date', '<=', now())
-                ->where('end_date', '>=', now())
-                ->first();
-
-            if ($bundleSubscription) {
-                $bundleSubscriptionId = $bundleSubscription->id;
-            }
-        }
-
-        return [
-            'account_id' => $accountId,
-            'bundle_subscription_id' => $bundleSubscriptionId
-        ];
-    }
-
-    /**
-     * Determine payment type
-     *
-     * @param array $accountInfo
-     * @param array $additionalData
-     * @return PaymentType
-     */
-    private function determinePaymentType(array $accountInfo, array $additionalData = []): PaymentType
-    {
-        // If payment_type_id is provided, use it
-        if (isset($additionalData['payment_type_id'])) {
-            return PaymentType::findOrFail($additionalData['payment_type_id']);
-        }
-
-        // If account exists, try to get default payment type
-        if ($accountInfo['account_id']) {
-            $account = Account::find($accountInfo['account_id']);
-            if ($account && $account->default_payment_type_id) {
-                return PaymentType::findOrFail($account->default_payment_type_id);
-            }
-        }
-
-        // Default to cash payment
-        return PaymentType::where('name', 'Cash')->firstOrFail();
-    }
-
-    /**
-     * Determine passage type
-     *
-     * @param array $accountInfo
-     * @param array $additionalData
-     * @return string
-     */
-    private function determinePassageType(array $accountInfo, array $additionalData = []): string
-    {
-        if (isset($additionalData['passage_type'])) {
-            return $additionalData['passage_type'];
-        }
-
-        // If has active bundle, it's free
-        if ($accountInfo['bundle_subscription_id']) {
-            return 'free';
-        }
-
-        // Check if exempted
-        if ($this->isExempted($accountInfo, $additionalData)) {
-            return 'exempted';
-        }
-
-        return 'toll';
-    }
-
-    /**
-     * Check if vehicle is exempted
-     *
-     * @param array $accountInfo
-     * @param array $additionalData
-     * @return bool
-     */
-    private function isExempted(array $accountInfo, array $additionalData = []): bool
-    {
-        if (isset($additionalData['is_exempted'])) {
-            return $additionalData['is_exempted'];
-        }
-
-        // Check account exemptions
-        if ($accountInfo['account_id']) {
-            $account = Account::find($accountInfo['account_id']);
-            if ($account && $account->is_exempted) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     /**
      * Determine gate action for entry
      *
      * @param VehiclePassage $passage
-     * @param array $accountInfo
+     * @param array $pricing
      * @return string
      */
-    private function determineGateAction(VehiclePassage $passage, array $accountInfo): string
+    private function determineGateAction(VehiclePassage $passage, array $pricing): string
     {
         // If free or exempted, allow entry
         if ($passage->passage_type === 'free' || $passage->passage_type === 'exempted') {
             return 'allow';
         }
 
-        // If has account, allow entry (payment will be handled at exit)
-        if ($accountInfo['account_id']) {
+        // If bundle subscription, allow entry
+        if ($pricing['payment_type'] === 'Bundle') {
             return 'allow';
         }
 
-        // For cash customers, allow entry (payment at exit)
+        // If exempted, allow entry
+        if ($pricing['payment_type'] === 'Exemption') {
+            return 'allow';
+        }
+
+        // For cash customers, check if payment is required
+        if ($pricing['payment_type'] === 'Cash') {
+            if ($pricing['requires_payment']) {
+                return 'require_payment';
+            }
+            return 'allow';
+        }
+
+        // Default to allow entry
         return 'allow';
     }
 
@@ -498,6 +402,49 @@ class VehiclePassageService
             'data' => $passages,
             'count' => $passages->count()
         ];
+    }
+
+    /**
+     * Get account for vehicle (only for bundle subscribers)
+     *
+     * @param Vehicle $vehicle
+     * @param array $additionalData
+     * @return Account|null
+     */
+    private function getAccountForVehicle(Vehicle $vehicle, array $additionalData = []): ?Account
+    {
+        // Check if account_id is provided in additional data
+        if (isset($additionalData['account_id'])) {
+            return Account::find($additionalData['account_id']);
+        }
+
+        // Try to find account by vehicle (only for bundle subscribers)
+        $accountVehicle = $vehicle->accountVehicles()->where('is_primary', true)->first();
+        if ($accountVehicle) {
+            $account = Account::find($accountVehicle->account_id);
+            // Only return account if it has active bundle subscription
+            if ($account && $this->pricingService->hasActiveBundleSubscription($account)) {
+                return $account;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Determine passage type from pricing
+     *
+     * @param array $pricing
+     * @return string
+     */
+    private function determinePassageTypeFromPricing(array $pricing): string
+    {
+        return match ($pricing['payment_type']) {
+            'Exemption' => 'exempted',
+            'Bundle' => 'free',
+            'Cash' => 'toll',
+            default => 'toll',
+        };
     }
 
     /**

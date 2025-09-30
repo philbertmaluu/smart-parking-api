@@ -7,6 +7,8 @@ use App\Http\Controllers\API\VehicleController;
 use App\Http\Controllers\API\CustomerController;
 use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\VehicleBodyTypeController;
+use App\Http\Controllers\API\VehicleBodyTypePriceController;
+use App\Http\Controllers\API\PricingController;
 use App\Http\Controllers\API\PaymentTypeController;
 use App\Http\Controllers\API\BundleTypeController;
 use App\Http\Controllers\API\VehiclePassageController;
@@ -81,6 +83,28 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('vehicle-body-types/with-vehicle-count', [VehicleBodyTypeController::class, 'getWithVehicleCount']);
         Route::get('vehicle-body-types/with-pricing', [VehicleBodyTypeController::class, 'getWithPricing']);
         Route::get('vehicle-body-types/category/{category}/with-pricing', [VehicleBodyTypeController::class, 'getByCategoryWithPricing']);
+
+        // Vehicle Body Type Pricing routes
+        Route::apiResource('vehicle-body-type-prices', VehicleBodyTypePriceController::class);
+        Route::post('vehicle-body-type-prices/current-price', [VehicleBodyTypePriceController::class, 'getCurrentPrice']);
+        Route::get('vehicle-body-type-prices/station/{stationId}', [VehicleBodyTypePriceController::class, 'getCurrentPricesForStation']);
+        Route::get('vehicle-body-type-prices/body-type/{bodyTypeId}', [VehicleBodyTypePriceController::class, 'getCurrentPricesForBodyType']);
+        Route::post('vehicle-body-type-prices/bulk-update', [VehicleBodyTypePriceController::class, 'bulkUpdate']);
+        Route::post('vehicle-body-type-prices/pricing-history', [VehicleBodyTypePriceController::class, 'getPricingHistory']);
+        Route::post('vehicle-body-type-prices/effective-on-date', [VehicleBodyTypePriceController::class, 'getPricesEffectiveOnDate']);
+        Route::get('vehicle-body-type-prices/search', [VehicleBodyTypePriceController::class, 'search']);
+        Route::get('vehicle-body-type-prices/summary', [VehicleBodyTypePriceController::class, 'getPricingSummary']);
+        Route::get('vehicle-body-type-prices/body-type/{bodyTypeId}/comparison', [VehicleBodyTypePriceController::class, 'getPriceComparison']);
+
+        // Pricing routes
+        Route::post('pricing/calculate', [PricingController::class, 'calculatePricing']);
+        Route::post('pricing/calculate-by-plate', [PricingController::class, 'calculatePricingByPlate']);
+        Route::get('pricing/station/{stationId}/summary', [PricingController::class, 'getStationPricingSummary']);
+        Route::get('pricing/station/{stationId}/validate', [PricingController::class, 'validatePricingConfiguration']);
+        Route::post('pricing/base-price', [PricingController::class, 'getBasePrice']);
+        Route::post('pricing/payment-type', [PricingController::class, 'determinePaymentType']);
+        Route::post('pricing/check-bundle', [PricingController::class, 'checkBundleSubscription']);
+        Route::post('pricing/bulk-calculate', [PricingController::class, 'calculateBulkPricing']);
 
         // Payment Type routes
         Route::apiResource('payment-types', PaymentTypeController::class);

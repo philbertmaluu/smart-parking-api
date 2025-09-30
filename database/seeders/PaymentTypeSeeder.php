@@ -15,35 +15,15 @@ class PaymentTypeSeeder extends Seeder
         $paymentTypes = [
             [
                 'name' => 'Cash',
-                'description' => 'Cash payment at the gate',
+                'description' => 'Cash payment at the gate (toll fee)',
             ],
             [
-                'name' => 'Credit Card',
-                'description' => 'Credit card payment',
+                'name' => 'Bundle',
+                'description' => 'Bundle subscription payment (free passage)',
             ],
             [
-                'name' => 'Debit Card',
-                'description' => 'Debit card payment',
-            ],
-            [
-                'name' => 'Mobile Money',
-                'description' => 'Mobile money transfer',
-            ],
-            [
-                'name' => 'Bank Transfer',
-                'description' => 'Direct bank transfer',
-            ],
-            [
-                'name' => 'Account Balance',
-                'description' => 'Payment from account balance',
-            ],
-            [
-                'name' => 'Bundle Subscription',
-                'description' => 'Payment covered by bundle subscription',
-            ],
-            [
-                'name' => 'Exempted',
-                'description' => 'Exempted from payment (emergency, official, etc.)',
+                'name' => 'Exemption',
+                'description' => 'Exempted from payment (emergency, official vehicles)',
             ],
         ];
 

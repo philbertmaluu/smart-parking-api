@@ -21,11 +21,16 @@ class Vehicle extends Model
         'color',
         'owner_name',
         'is_registered',
+        'is_exempted',
+        'exemption_reason',
+        'exemption_expires_at',
     ];
 
     protected $casts = [
         'year' => 'integer',
         'is_registered' => 'boolean',
+        'is_exempted' => 'boolean',
+        'exemption_expires_at' => 'datetime',
     ];
 
     /**
@@ -36,7 +41,7 @@ class Vehicle extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['body_type_id', 'plate_number', 'make', 'model', 'year', 'color', 'owner_name', 'is_registered'])
+            ->logOnly(['body_type_id', 'plate_number', 'make', 'model', 'year', 'color', 'owner_name', 'is_registered', 'is_exempted', 'exemption_reason', 'exemption_expires_at'])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs();
     }
@@ -139,5 +144,77 @@ class Vehicle extends Model
     {
         $parts = array_filter([$this->make, $this->model, $this->year]);
         return implode(' ', $parts);
+    }
+
+    /**
+     * Scope a query to only include exempted vehicles.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeExempted($query)
+    {
+        return $query->where('is_exempted', true);
+    }
+
+    /**
+     * Scope a query to only include non-exempted vehicles.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeNonExempted($query)
+    {
+        return $query->where('is_exempted', false);
+    }
+
+    /**
+     * Check if the vehicle is currently exempted.
+     *
+     * @return bool
+     */
+    public function isCurrentlyExempted(): bool
+    {
+        if (!$this->is_exempted) {
+            return false;
+        }
+
+        // If no expiration date, exemption is permanent
+        if (is_null($this->exemption_expires_at)) {
+            return true;
+        }
+
+        // Check if exemption has expired
+        return $this->exemption_expires_at->isFuture();
+    }
+
+    /**
+     * Set vehicle exemption.
+     *
+     * @param string $reason
+     * @param \Carbon\Carbon|null $expiresAt
+     * @return bool
+     */
+    public function setExemption(string $reason, $expiresAt = null): bool
+    {
+        return $this->update([
+            'is_exempted' => true,
+            'exemption_reason' => $reason,
+            'exemption_expires_at' => $expiresAt,
+        ]);
+    }
+
+    /**
+     * Remove vehicle exemption.
+     *
+     * @return bool
+     */
+    public function removeExemption(): bool
+    {
+        return $this->update([
+            'is_exempted' => false,
+            'exemption_reason' => null,
+            'exemption_expires_at' => null,
+        ]);
     }
 }

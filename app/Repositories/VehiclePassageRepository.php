@@ -10,6 +10,7 @@ use App\Models\Account;
 use App\Models\BundleSubscription;
 use App\Models\PaymentType;
 use App\Models\VehicleBodyTypePrice;
+use App\Services\PricingService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
@@ -18,10 +19,12 @@ use Carbon\Carbon;
 class VehiclePassageRepository
 {
     protected $model;
+    protected $pricingService;
 
-    public function __construct(VehiclePassage $model)
+    public function __construct(VehiclePassage $model, PricingService $pricingService)
     {
         $this->model = $model;
+        $this->pricingService = $pricingService;
     }
 
     /**
@@ -108,11 +111,8 @@ class VehiclePassageRepository
             $data['entry_time'] = now();
         }
 
-        // Calculate pricing
-        $pricing = $this->calculatePricing($data);
-        $data['base_amount'] = $pricing['base_amount'];
-        $data['discount_amount'] = $pricing['discount_amount'];
-        $data['total_amount'] = $pricing['total_amount'];
+        // Pricing is now calculated in VehiclePassageService and passed in $data
+        // No need to recalculate here
 
         return $this->model->create($data);
     }
@@ -140,11 +140,12 @@ class VehiclePassageRepository
         // Calculate duration
         $data['duration_minutes'] = $passage->entry_time->diffInMinutes($data['exit_time']);
 
-        // Recalculate pricing based on duration
-        $pricing = $this->calculatePricingForExit($passage, $data);
-        $data['base_amount'] = $pricing['base_amount'];
-        $data['discount_amount'] = $pricing['discount_amount'];
-        $data['total_amount'] = $pricing['total_amount'];
+        // For now, keep the same pricing as entry
+        // Future enhancement: implement time-based pricing using PricingService
+        // $pricing = $this->pricingService->calculatePricingForExit($passage, $data);
+        // $data['base_amount'] = $pricing['base_amount'];
+        // $data['discount_amount'] = $pricing['discount_amount'];
+        // $data['total_amount'] = $pricing['total_amount'];
 
         $passage->update($data);
         return $passage->fresh();
@@ -353,71 +354,5 @@ class VehiclePassageRepository
         } while ($this->model->where('passage_number', $passageNumber)->exists());
 
         return $passageNumber;
-    }
-
-    /**
-     * Calculate pricing for entry
-     *
-     * @param array $data
-     * @return array
-     */
-    private function calculatePricing(array $data): array
-    {
-        $vehicle = Vehicle::with('bodyType')->find($data['vehicle_id']);
-        $baseAmount = 0;
-        $discountAmount = 0;
-
-        if ($vehicle && $vehicle->bodyType) {
-            $price = VehicleBodyTypePrice::where('body_type_id', $vehicle->body_type_id)
-                ->where('station_id', $data['entry_station_id'])
-                ->first();
-
-            if ($price) {
-                $baseAmount = $price->price;
-            }
-        }
-
-        // Apply discounts based on account, bundle, etc.
-        if (isset($data['account_id']) && $data['account_id']) {
-            $account = Account::find($data['account_id']);
-            if ($account && $account->discount_percentage > 0) {
-                $discountAmount = ($baseAmount * $account->discount_percentage) / 100;
-            }
-        }
-
-        // Check for bundle subscription
-        if (isset($data['bundle_subscription_id']) && $data['bundle_subscription_id']) {
-            $bundleSubscription = BundleSubscription::find($data['bundle_subscription_id']);
-            if ($bundleSubscription && $bundleSubscription->isActive()) {
-                $baseAmount = 0; // Free with active bundle
-                $discountAmount = 0;
-            }
-        }
-
-        $totalAmount = $baseAmount - $discountAmount;
-
-        return [
-            'base_amount' => $baseAmount,
-            'discount_amount' => $discountAmount,
-            'total_amount' => max(0, $totalAmount)
-        ];
-    }
-
-    /**
-     * Calculate pricing for exit (may include time-based pricing)
-     *
-     * @param VehiclePassage $passage
-     * @param array $data
-     * @return array
-     */
-    private function calculatePricingForExit(VehiclePassage $passage, array $data): array
-    {
-        // For now, return the same pricing as entry
-        // This can be extended for time-based pricing
-        return [
-            'base_amount' => $passage->base_amount,
-            'discount_amount' => $passage->discount_amount,
-            'total_amount' => $passage->total_amount
-        ];
     }
 }
