@@ -25,9 +25,9 @@ class UserSeeder extends Seeder
             ['email' => 'admin@smartparking.com'],
             [
                 'username' => 'admin',
-                'email' => 'admin@smartparking.com',
+                'email' => 'admin@gmail.com',
                 'phone' => '+1234567890',
-                'password' => Hash::make('password123'),
+                'password' => Hash::make('12341234'),
                 'address' => '123 Admin Street, City, State 12345',
                 'gender' => 'male',
                 'date_of_birth' => '1985-01-15',
@@ -39,12 +39,12 @@ class UserSeeder extends Seeder
 
         // Create Stations Manager
         $stationsManager = User::updateOrCreate(
-            ['email' => 'manager@smartparking.com'],
+            ['email' => 'manager@gmail.com'],
             [
                 'username' => 'manager',
-                'email' => 'manager@smartparking.com',
+                'email' => 'manager@gmail.com',
                 'phone' => '+1234567891',
-                'password' => Hash::make('password123'),
+                'password' => Hash::make('12341234'),
                 'address' => '456 Manager Avenue, City, State 12345',
                 'gender' => 'female',
                 'date_of_birth' => '1990-05-20',
@@ -58,7 +58,7 @@ class UserSeeder extends Seeder
         $gateOperators = [
             [
                 'username' => 'operator1',
-                'email' => 'operator1@smartparking.com',
+                'email' => 'operator1@gmail.com',
                 'phone' => '+1234567892',
                 'address' => '789 Operator Lane, City, State 12345',
                 'gender' => 'male',
@@ -66,7 +66,7 @@ class UserSeeder extends Seeder
             ],
             [
                 'username' => 'operator2',
-                'email' => 'operator2@smartparking.com',
+                'email' => 'operator2@gmail.com',
                 'phone' => '+1234567893',
                 'address' => '321 Operator Road, City, State 12345',
                 'gender' => 'female',
@@ -74,7 +74,7 @@ class UserSeeder extends Seeder
             ],
             [
                 'username' => 'operator3',
-                'email' => 'operator3@smartparking.com',
+                'email' => 'operator3@gmail.com',
                 'phone' => '+1234567894',
                 'address' => '654 Operator Drive, City, State 12345',
                 'gender' => 'male',
@@ -86,7 +86,7 @@ class UserSeeder extends Seeder
             $operator = User::updateOrCreate(
                 ['email' => $operatorData['email']],
                 array_merge($operatorData, [
-                    'password' => Hash::make('password123'),
+                    'password' => Hash::make('12341234'),
                     'role_id' => $gateOperatorRole->id,
                     'is_active' => true,
                     'email_verified_at' => now(),
@@ -105,7 +105,7 @@ class UserSeeder extends Seeder
         }
 
         $this->command->info('Users seeded successfully!');
-        $this->command->info('Default password for all users: password123');
+        $this->command->info('Default password for all users: 12341234');
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Http\Controllers\API\VehicleBodyTypePriceController;
 use App\Http\Controllers\API\PricingController;
 use App\Http\Controllers\API\PaymentTypeController;
 use App\Http\Controllers\API\BundleTypeController;
+use App\Http\Controllers\API\BundleController;
 use App\Http\Controllers\API\VehiclePassageController;
 use App\Http\Controllers\API\GateControlController;
 use App\Http\Controllers\API\ReceiptController;
@@ -121,6 +122,15 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('bundle-types/duration/{durationDays}', [BundleTypeController::class, 'getByDuration']);
         Route::get('bundle-types/with-bundle-count', [BundleTypeController::class, 'getWithBundleCount']);
         Route::get('bundle-types/popular', [BundleTypeController::class, 'getPopular']);
+
+        // Bundle routes
+        Route::apiResource('bundles', BundleController::class);
+        Route::post('bundles/{id}/toggle-status', [BundleController::class, 'toggleStatus']);
+        Route::get('bundles/active/list', [BundleController::class, 'getActiveBundles']);
+        Route::get('bundles/type/{bundleTypeId}', [BundleController::class, 'getByType']);
+        Route::get('bundles/price-range', [BundleController::class, 'getByPriceRange']);
+        Route::get('bundles/with-subscription-count', [BundleController::class, 'getWithSubscriptionCount']);
+        Route::get('bundles/popular', [BundleController::class, 'getPopular']);
 
         // Vehicle Passage routes
         Route::apiResource('vehicle-passages', VehiclePassageController::class);
