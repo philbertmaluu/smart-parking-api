@@ -11,7 +11,10 @@ use App\Http\Controllers\API\VehicleBodyTypePriceController;
 use App\Http\Controllers\API\PricingController;
 use App\Http\Controllers\API\PaymentTypeController;
 use App\Http\Controllers\API\BundleTypeController;
+use App\Http\Controllers\API\AccountController;
+use App\Http\Controllers\API\CustomerAccountController;
 use App\Http\Controllers\API\BundleController;
+use App\Http\Controllers\API\BundleSubscriptionController;
 use App\Http\Controllers\API\VehiclePassageController;
 use App\Http\Controllers\API\GateControlController;
 use App\Http\Controllers\API\ReceiptController;
@@ -77,6 +80,20 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('customers/{customer}/statistics', [CustomerController::class, 'getStatistics']);
         Route::get('customers/active/list', [CustomerController::class, 'getActiveCustomers']);
 
+        // Account routes
+        Route::apiResource('accounts', AccountController::class);
+        Route::post('accounts/{id}/toggle-status', [AccountController::class, 'toggleStatus']);
+        Route::get('accounts/active/list', [AccountController::class, 'getActiveAccounts']);
+        Route::get('accounts/type/{type}', [AccountController::class, 'getByType']);
+        Route::get('accounts/customer/{customerId}', [AccountController::class, 'getByCustomer']);
+        Route::get('accounts/{id}/statistics', [AccountController::class, 'getStatistics']);
+
+        // Customer Account routes (Complete User + Customer + Account management)
+        Route::apiResource('customer-accounts', CustomerAccountController::class);
+        Route::post('customer-accounts/{accountId}/vehicles', [CustomerAccountController::class, 'addVehicle']);
+        Route::delete('customer-accounts/{accountId}/vehicles/{vehicleId}', [CustomerAccountController::class, 'removeVehicle']);
+        Route::get('customer-accounts/{accountId}/vehicles', [CustomerAccountController::class, 'getVehicles']);
+
         // Vehicle Body Type routes
         Route::apiResource('vehicle-body-types', VehicleBodyTypeController::class);
         Route::get('vehicle-body-types/active/list', [VehicleBodyTypeController::class, 'getActiveVehicleBodyTypes']);
@@ -131,6 +148,15 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('bundles/price-range', [BundleController::class, 'getByPriceRange']);
         Route::get('bundles/with-subscription-count', [BundleController::class, 'getWithSubscriptionCount']);
         Route::get('bundles/popular', [BundleController::class, 'getPopular']);
+
+        // Bundle Subscription routes
+        Route::apiResource('bundle-subscriptions', BundleSubscriptionController::class);
+        Route::put('bundle-subscriptions/{id}/status', [BundleSubscriptionController::class, 'updateStatus']);
+        Route::get('bundle-subscriptions/active/list', [BundleSubscriptionController::class, 'getActiveSubscriptions']);
+        Route::get('bundle-subscriptions/account/{accountId}', [BundleSubscriptionController::class, 'getByAccount']);
+        Route::get('bundle-subscriptions/bundle/{bundleId}', [BundleSubscriptionController::class, 'getByBundle']);
+        Route::get('bundle-subscriptions/usage-stats', [BundleSubscriptionController::class, 'getWithUsageStats']);
+        Route::get('bundle-subscriptions/expiring', [BundleSubscriptionController::class, 'getExpiringSubscriptions']);
 
         // Vehicle Passage routes
         Route::apiResource('vehicle-passages', VehiclePassageController::class);
