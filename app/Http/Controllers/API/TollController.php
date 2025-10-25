@@ -212,7 +212,7 @@ class TollController extends BaseController
             $entryTime = $passage->entry_time;
             $currentTime = now();
             $hoursSpent = $entryTime->diffInHours($currentTime, true);
-            $hoursToCharge = max(1, ceil($hoursSpent));
+            $hoursToCharge = $this->calculateHoursToCharge($hoursSpent);
             $totalAmount = $passage->base_amount * $hoursToCharge;
 
             $data = [
@@ -259,5 +259,48 @@ class TollController extends BaseController
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving statistics', $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Calculate total billable hours based on parking time and smart charging rules.
+     *
+     * ⚖️ Charging Rules:
+     * - Minimum charge — always 1 hour (TSh 2,000)
+     *   Even if someone parks for 5 minutes or 30 minutes, they must pay for 1 hour.
+     * - Up to 1 hour 30 minutes → Still charge only 1 hour (TSh 2,000)
+     *   Small "grace period" makes customers feel treated fairly.
+     * - From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours (TSh 4,000)
+     * - More than 2 hours → Round up to the next full hour
+     *   After 2 hours, charge by each full hour — always rounding up.
+     *
+     * Examples:
+     *  - 07:00 to 07:30 → 0.5 hours → charge 1 hour (TSh 2,000)
+     *  - 07:00 to 08:20 → 1.33 hours → charge 1 hour (TSh 2,000)
+     *  - 07:00 to 08:40 → 1.66 hours → charge 2 hours (TSh 4,000)
+     *  - 07:00 to 09:10 → 2.16 hours → charge 3 hours (TSh 6,000)
+     *  - 07:00 to 10:05 → 3.08 hours → charge 4 hours (TSh 8,000)
+     *
+     * @param float $hoursSpent  Actual number of hours spent (e.g., 1.25 = 1h15m)
+     * @return int  Billable hours to charge
+     */
+    private function calculateHoursToCharge(float $hoursSpent): int
+    {
+        // Minimum charge — always 1 hour
+        if ($hoursSpent <= 0) {
+            return 1;
+        }
+
+        // Up to 1 hour 30 minutes → Still charge only 1 hour
+        if ($hoursSpent <= 1.5) {
+            return 1;
+        }
+
+        // From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
+        if ($hoursSpent < 2.0) {
+            return 2;
+        }
+
+        // More than 2 hours → Round up to the next full hour
+        return (int) ceil($hoursSpent);
     }
 }
