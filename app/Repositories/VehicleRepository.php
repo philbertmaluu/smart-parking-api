@@ -3,6 +3,7 @@
 namespace App\Repositories;
 
 use App\Models\Vehicle;
+use App\Models\VehicleBodyTypePrice;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 
@@ -198,7 +199,8 @@ class VehicleRepository
     public function searchByPlateNumber(string $plateNumber): ?Vehicle
     {
         return $this->model->where('plate_number', 'like', "%{$plateNumber}%")
-            ->with(['bodyType'])
+            ->with(['bodyType', 'bodyType.prices'])
+            ->with(['vehiclePassages'])
             ->first();
     }
 

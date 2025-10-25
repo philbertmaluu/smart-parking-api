@@ -59,9 +59,25 @@ class TollService
                 ];
             }
 
-            // Step 3: Create passage entry
+            // Step 3: Generate passage number
+            $passageNumber = 'PASS-' . date('Ymd') . '-' . str_pad(VehiclePassage::count() + 1, 6, '0', STR_PAD_LEFT);
+            
+            // Get default payment type (Cash)
+            $defaultPaymentType = PaymentType::where('name', 'Cash')->first();
+            if (!$defaultPaymentType) {
+                // Create default payment type if it doesn't exist
+                $defaultPaymentType = PaymentType::create([
+                    'name' => 'Cash',
+                    'description' => 'Cash payment',
+                    'is_active' => true
+                ]);
+            }
+
+            // Step 4: Create passage entry
             $passage = VehiclePassage::create([
+                'passage_number' => $passageNumber,
                 'vehicle_id' => $vehicle->id,
+                'payment_type_id' => $defaultPaymentType->id,
                 'entry_time' => now(),
                 'entry_operator_id' => $operatorId,
                 'entry_gate_id' => $gateId,
@@ -69,11 +85,11 @@ class TollService
                 'passage_type' => 'toll',
                 'base_amount' => $bodyTypePrice->base_price,
                 'discount_amount' => 0,
-                'total_amount' => 0, // Will be calculated on exit
+                'total_amount' => $bodyTypePrice->base_price, // Set initial total amount
                 'notes' => $additionalData['notes'] ?? null,
             ]);
 
-            // Step 4: Log the passage entry
+            // Step 5: Log the passage entry
             Log::info('Vehicle entry processed - Simple Toll', [
                 'plate_number' => $plateNumber,
                 'passage_id' => $passage->id,
@@ -323,9 +339,14 @@ class TollService
         $vehicle = Vehicle::where('plate_number', $plateNumber)->first();
 
         if (!$vehicle) {
+            // Require body_type_id for new vehicles
+            if (!isset($additionalData['body_type_id'])) {
+                throw new Exception('Body type ID is required for new vehicles');
+            }
+            
             $vehicle = Vehicle::create([
                 'plate_number' => $plateNumber,
-                'body_type_id' => $additionalData['body_type_id'] ?? 1, // Default to car
+                'body_type_id' => $additionalData['body_type_id'],
                 'make' => $additionalData['make'] ?? null,
                 'model' => $additionalData['model'] ?? null,
                 'year' => $additionalData['year'] ?? null,
