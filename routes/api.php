@@ -19,6 +19,7 @@ use App\Http\Controllers\API\VehiclePassageController;
 use App\Http\Controllers\API\GateControlController;
 use App\Http\Controllers\API\ReceiptController;
 use App\Http\Controllers\API\CameraController;
+use App\Http\Controllers\API\TollController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -205,6 +206,17 @@ Route::prefix('toll-v1')->group(function () {
         Route::post('stream/hls/{cameraId?}/stop', [CameraController::class, 'stopHlsStream']);
         Route::get('camera/test-connection', [CameraController::class, 'testConnection']);
         Route::get('camera/status/{cameraId?}', [CameraController::class, 'getStatus']);
+
+        // Toll Service routes (Simplified toll system)
+        Route::prefix('toll')->group(function () {
+            Route::post('/entry', [TollController::class, 'processEntry']);
+            Route::post('/exit', [TollController::class, 'processExit']);
+            Route::post('/confirm-payment', [TollController::class, 'confirmPayment']);
+            Route::get('/active-passages', [TollController::class, 'getActivePassages']);
+            Route::get('/passage/{passageId}', [TollController::class, 'getPassageDetails']);
+            Route::post('/calculate-toll', [TollController::class, 'calculateTollAmount']);
+            Route::get('/statistics', [TollController::class, 'getStatistics']);
+        });
     });
 
     // Public camera endpoints for testing

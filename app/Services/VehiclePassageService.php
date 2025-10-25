@@ -54,8 +54,19 @@ class VehiclePassageService
             // Find or create vehicle
             $vehicle = $this->findOrCreateVehicle($plateNumber, $additionalData);
 
+
             // Get gate and station information
             $gate = Gate::with('station')->findOrFail($gateId);
+
+            if (!$gate) {
+                DB::rollBack();
+                return [
+                    'success' => false,
+                    'message' => 'Gate not found',
+                    'data' => null,
+                    'gate_action' => 'deny'
+                ];
+            }
 
             // Check if vehicle already has an active passage
             $activePassage = $this->passageRepository->getActivePassageByVehicle($vehicle->id);
