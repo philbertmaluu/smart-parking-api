@@ -143,4 +143,23 @@ class GateDevice extends Model
             },
         );
     }
+
+    /**
+     * Get the camera configuration in a format suitable for the frontend.
+     */
+    public function getCameraConfig()
+    {
+        return [
+            'ip' => $this->ip_address,
+            'httpPort' => $this->http_port,
+            'rtspPort' => $this->rtsp_port,
+            'username' => $this->username,
+            'password' => $this->password,
+            'useHttps' => $this->use_https,
+            'name' => $this->name,
+            'deviceId' => $this->device_id,
+            'supportsRtsp' => $this->supports_rtsp,
+            'supportsSnapshot' => $this->supports_snapshot,
+        ];
+    }
 }

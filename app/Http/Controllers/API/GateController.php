@@ -199,4 +199,35 @@ class GateController extends BaseController
             return $this->sendError('Error retrieving gates', $e->getMessage(), 500);
         }
     }
+
+    /**
+     * Get camera configuration for a gate
+     */
+    public function getCameraConfig($id)
+    {
+        try {
+            $gate = Gate::with('devices')->find($id);
+
+            if (!$gate) {
+                return $this->sendError('Gate not found', [], 404);
+            }
+
+            // Get the primary camera (first active camera)
+            $camera = $gate->devices()
+                ->where('device_type', 'camera')
+                ->where('status', 'active')
+                ->first();
+
+            if (!$camera) {
+                return $this->sendError('No active camera found for this gate', [], 404);
+            }
+
+            // Return camera configuration
+            $config = $camera->getCameraConfig();
+
+            return $this->sendResponse($config, 'Camera configuration retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving camera configuration', $e->getMessage(), 500);
+        }
+    }
 }

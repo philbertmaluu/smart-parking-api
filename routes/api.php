@@ -30,6 +30,9 @@ Route::prefix('toll-v1')->group(function () {
     Route::post('/forgot-password', [AuthController::class, 'sendResetLink']);
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
+    // Public camera config endpoint (for operators to view cameras)
+    Route::get('/gates/{gate}/camera-config', [GateController::class, 'getCameraConfig']);
+
     // Protected routes
     Route::middleware('auth:sanctum')->group(function () {
         // Auth routes

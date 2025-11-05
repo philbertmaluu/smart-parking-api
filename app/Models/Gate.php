@@ -47,6 +47,36 @@ class Gate extends Model
     }
 
     /**
+     * Get all devices for this gate.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     */
+    public function devices()
+    {
+        return $this->hasMany(GateDevice::class);
+    }
+
+    /**
+     * Get cameras for this gate.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     */
+    public function cameras()
+    {
+        return $this->hasMany(GateDevice::class)->where('device_type', 'camera');
+    }
+
+    /**
+     * Get the primary camera for this gate.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasOne
+     */
+    public function primaryCamera()
+    {
+        return $this->hasOne(GateDevice::class)->where('device_type', 'camera')->where('status', 'active')->oldest();
+    }
+
+    /**
      * Get all vehicle passages that entered through this gate.
      *
      * @return \Illuminate\Database\Eloquent\Relations\HasMany
