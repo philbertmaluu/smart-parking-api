@@ -21,7 +21,6 @@ use App\Http\Controllers\API\ReceiptController;
 use App\Http\Controllers\API\CameraController;
 use App\Http\Controllers\API\TollController;
 use App\Http\Controllers\API\GateDeviceController;
-use App\Http\Controllers\API\OperatorController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -41,6 +40,18 @@ Route::prefix('toll-v1')->group(function () {
         Route::put('/profile', [AuthController::class, 'updateProfile']);
         Route::post('/change-password', [AuthController::class, 'changePassword']);
         Route::post('/refresh-token', [AuthController::class, 'refreshToken']);
+
+        // Operator management routes (Admin/Manager only)
+        Route::prefix('operators')->group(function () {
+            Route::get('/', [AuthController::class, 'getOperators']);
+            Route::post('/', [AuthController::class, 'createOperator']);
+            Route::get('/{id}', [AuthController::class, 'getOperator']);
+            Route::put('/{id}', [AuthController::class, 'updateOperator']);
+            Route::post('/{id}/activate', [AuthController::class, 'activateOperator']);
+            Route::post('/{id}/deactivate', [AuthController::class, 'deactivateOperator']);
+            Route::post('/{id}/reset-password', [AuthController::class, 'resetOperatorPassword']);
+            Route::delete('/{id}', [AuthController::class, 'deleteOperator']);
+        });
 
         // Roles
         Route::get('/roles', [AuthController::class, 'getRoles']);
