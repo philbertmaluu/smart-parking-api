@@ -5,16 +5,19 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\BaseController;
 use App\Http\Requests\OperatorRequest;
 use App\Repositories\OperatorRepository;
+use App\Repositories\GateDeviceRepository;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class OperatorController extends BaseController
 {
     protected $operatorRepository;
+    protected $gateDeviceRepository;
 
-    public function __construct(OperatorRepository $operatorRepository)
+    public function __construct(OperatorRepository $operatorRepository, GateDeviceRepository $gateDeviceRepository)
     {
         $this->operatorRepository = $operatorRepository;
+        $this->gateDeviceRepository = $gateDeviceRepository;
     }
 
     /**
@@ -212,10 +215,59 @@ class OperatorController extends BaseController
                 return $this->sendError('Failed to select gate. Gate may be occupied or operator not assigned to station', [], 400);
             }
 
+            // Fetch gate devices for the selected gate
+            $gateDevices = $this->gateDeviceRepository->getGateDevicesByGate($request->gate_id);
+            
             $operator = $this->operatorRepository->getOperatorByIdWithRelations($user->id);
-            return $this->sendResponse($operator, 'Gate selected successfully');
+            
+            return $this->sendResponse([
+                'operator' => $operator,
+                'gate_devices' => $gateDevices,
+            ], 'Gate selected successfully');
         } catch (\Exception $e) {
             return $this->sendError('Error selecting gate', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get devices for the logged-in operator's currently selected gate
+     */
+    public function getMySelectedGateDevices(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return $this->sendError('Unauthorized', [], 401);
+            }
+
+            if (!$user->hasRole('Gate Operator')) {
+                return $this->sendError('Only Gate Operators can access this endpoint', [], 403);
+            }
+
+            // Get operator's assigned stations with current gate
+            $assignedStations = $user->assignedStations()
+                ->where('operator_station.is_active', true)
+                ->whereNotNull('operator_station.current_gate_id')
+                ->get();
+
+            if ($assignedStations->isEmpty()) {
+                return $this->sendError('No gate selected. Please select a gate first', [], 404);
+            }
+
+            // Get the first selected gate (in case operator has multiple stations, get the first one)
+            $selectedGateId = $assignedStations->first()->pivot->current_gate_id;
+            
+            if (!$selectedGateId) {
+                return $this->sendError('No gate selected. Please select a gate first', [], 404);
+            }
+
+            // Fetch gate devices for the selected gate
+            $gateDevices = $this->gateDeviceRepository->getGateDevicesByGate($selectedGateId);
+            
+            return $this->sendResponse($gateDevices, 'Gate devices retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving gate devices', $e->getMessage(), 500);
         }
     }
 }

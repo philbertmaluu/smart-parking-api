@@ -95,6 +95,7 @@ Route::prefix('toll-v1')->group(function () {
         // Logged-in operator routes (for operators to manage their own gates)
         Route::get('operators/me/available-gates', [OperatorController::class, 'getMyAvailableGates']);
         Route::post('operators/me/select-gate', [OperatorController::class, 'selectGate']);
+        Route::get('operators/me/selected-gate/devices', [OperatorController::class, 'getMySelectedGateDevices']);
 
         // Vehicle routes
         Route::get('vehicles/search/plate/{plateNumber}', [VehicleController::class, 'searchByPlate']);
