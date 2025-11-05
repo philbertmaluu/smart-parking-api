@@ -156,5 +156,67 @@ class OperatorController extends BaseController
             return $this->sendError('Error retrieving operators', $e->getMessage(), 500);
         }
     }
+
+    /**
+     * Get available gates for logged-in operator
+     * Excludes gates that are currently selected by other operators in the same station
+     */
+    public function getMyAvailableGates(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return $this->sendError('Unauthorized', [], 401);
+            }
+
+            if (!$user->hasRole('Gate Operator')) {
+                return $this->sendError('Only Gate Operators can access this endpoint', [], 403);
+            }
+
+            $gates = $this->operatorRepository->getAvailableGatesForLoggedInOperator($user->id);
+            return $this->sendResponse($gates, 'Available gates retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving available gates', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Select a gate for logged-in operator
+     */
+    public function selectGate(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return $this->sendError('Unauthorized', [], 401);
+            }
+
+            if (!$user->hasRole('Gate Operator')) {
+                return $this->sendError('Only Gate Operators can access this endpoint', [], 403);
+            }
+
+            $request->validate([
+                'station_id' => 'required|exists:stations,id',
+                'gate_id' => 'required|exists:gates,id',
+            ]);
+
+            $success = $this->operatorRepository->selectGateForOperator(
+                $user->id,
+                $request->station_id,
+                $request->gate_id
+            );
+
+            if (!$success) {
+                return $this->sendError('Failed to select gate. Gate may be occupied or operator not assigned to station', [], 400);
+            }
+
+            $operator = $this->operatorRepository->getOperatorByIdWithRelations($user->id);
+            return $this->sendResponse($operator, 'Gate selected successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error selecting gate', $e->getMessage(), 500);
+        }
+    }
 }
 

@@ -80,6 +80,10 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('operators/{operatorId}/available-gates', [OperatorController::class, 'getAvailableGates']);
         Route::post('operators/{operatorId}/assign-station', [OperatorController::class, 'assignStation']);
         Route::post('operators/{operatorId}/unassign-station', [OperatorController::class, 'unassignStation']);
+        
+        // Logged-in operator routes (for operators to manage their own gates)
+        Route::get('operators/me/available-gates', [OperatorController::class, 'getMyAvailableGates']);
+        Route::post('operators/me/select-gate', [OperatorController::class, 'selectGate']);
 
         // Vehicle routes
         Route::get('vehicles/search/plate/{plateNumber}', [VehicleController::class, 'searchByPlate']);

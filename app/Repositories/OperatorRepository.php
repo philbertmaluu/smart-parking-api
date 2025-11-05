@@ -185,6 +185,105 @@ class OperatorRepository
     }
 
     /**
+     * Get available gates for logged-in operator (excluding gates selected by other operators)
+     *
+     * @param int $userId
+     * @return Collection
+     */
+    public function getAvailableGatesForLoggedInOperator(int $userId): Collection
+    {
+        $user = $this->userModel->find($userId);
+        if (!$user || !$user->hasRole('Gate Operator')) {
+            return collect([]);
+        }
+
+        // Get operator's assigned stations
+        $assignedStations = $user->assignedStations()
+            ->where('operator_station.is_active', true)
+            ->get();
+
+        if ($assignedStations->isEmpty()) {
+            return collect([]);
+        }
+
+        $stationIds = $assignedStations->pluck('id');
+        
+        // Get gates that are currently selected by other operators in the same stations
+        $occupiedGateIds = DB::table('operator_station')
+            ->whereIn('station_id', $stationIds)
+            ->where('user_id', '!=', $userId)
+            ->where('is_active', true)
+            ->whereNotNull('current_gate_id')
+            ->pluck('current_gate_id')
+            ->unique();
+
+        // Get all active gates for assigned stations, excluding occupied ones
+        $availableGates = Gate::whereIn('station_id', $stationIds)
+            ->where('is_active', true)
+            ->whereNotIn('id', $occupiedGateIds)
+            ->with('station')
+            ->get();
+
+        return $availableGates;
+    }
+
+    /**
+     * Select a gate for an operator at a station
+     *
+     * @param int $userId
+     * @param int $stationId
+     * @param int $gateId
+     * @return bool
+     */
+    public function selectGateForOperator(int $userId, int $stationId, int $gateId): bool
+    {
+        $user = $this->userModel->find($userId);
+        if (!$user || !$user->hasRole('Gate Operator')) {
+            return false;
+        }
+
+        // Verify operator is assigned to this station
+        $isAssigned = $user->assignedStations()
+            ->where('station_id', $stationId)
+            ->where('operator_station.is_active', true)
+            ->exists();
+
+        if (!$isAssigned) {
+            return false;
+        }
+
+        // Verify gate belongs to this station
+        $gate = Gate::where('id', $gateId)
+            ->where('station_id', $stationId)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$gate) {
+            return false;
+        }
+
+        // Check if gate is already selected by another operator
+        $isOccupied = DB::table('operator_station')
+            ->where('station_id', $stationId)
+            ->where('user_id', '!=', $userId)
+            ->where('is_active', true)
+            ->where('current_gate_id', $gateId)
+            ->exists();
+
+        if ($isOccupied) {
+            return false;
+        }
+
+        // Update operator's current gate
+        $user->assignedStations()->updateExistingPivot($stationId, [
+            'current_gate_id' => $gateId,
+            'gate_selected_at' => now(),
+        ]);
+
+        return true;
+    }
+
+    /**
      * Search operators
      *
      * @param string $search

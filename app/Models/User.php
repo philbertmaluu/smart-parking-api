@@ -155,7 +155,7 @@ class User extends Authenticatable
     public function assignedStations()
     {
         return $this->belongsToMany(Station::class, 'operator_station')
-            ->withPivot('is_active', 'assigned_at', 'assigned_by')
+            ->withPivot('is_active', 'assigned_at', 'assigned_by', 'current_gate_id', 'gate_selected_at')
             ->withTimestamps();
     }
 
