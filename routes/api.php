@@ -222,12 +222,26 @@ Route::prefix('toll-v1')->group(function () {
     // Public camera endpoints for testing
     Route::get('camera/status/{cameraId?}', [CameraController::class, 'getStatus']);
     Route::get('camera/test-connection', [CameraController::class, 'testConnection']);
+    Route::get('camera-proxy', [CameraController::class, 'cameraProxy']);
+    Route::post('camera-proxy', [CameraController::class, 'cameraProxy']);
     Route::get('stream/snapshot/{cameraId?}', [CameraController::class, 'snapshot']);
     Route::get('stream/mjpeg/{cameraId?}', [CameraController::class, 'mjpegStream']);
     Route::get('stream/optimized/{cameraId?}', [CameraController::class, 'optimizedStream']);
     Route::get('stream/hls/{cameraId?}', [CameraController::class, 'hlsStream']);
     Route::get('stream/hls/{cameraId}/{segment}', [CameraController::class, 'hlsSegment']);
     Route::post('stream/hls/{cameraId?}/stop', [CameraController::class, 'stopHlsStream']);
+
+    // Public ZKTeco Camera routes (for camera setup and testing)
+    Route::prefix('zkteco')->group(function () {
+        Route::get('config', [CameraController::class, 'zktecoConfig']);
+        Route::post('test-connection', [CameraController::class, 'zktecoTestConnection']);
+        Route::post('snapshot', [CameraController::class, 'zktecoSnapshot']);
+        Route::post('rtsp-url', [CameraController::class, 'zktecoRtspUrl']);
+        Route::post('device-info', [CameraController::class, 'zktecoDeviceInfo']);
+        Route::post('validate-credentials', [CameraController::class, 'zktecoValidateCredentials']);
+        Route::get('mjpeg-stream', [CameraController::class, 'zktecoMjpegStream']);
+        Route::post('mjpeg-stream', [CameraController::class, 'zktecoMjpegStream']);
+    });
 
     // Health check
     Route::get('/health', function () {

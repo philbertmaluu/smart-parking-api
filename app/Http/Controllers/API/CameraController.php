@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\BaseController;
+use App\Services\ZKTecoCameraService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Process;
@@ -10,7 +11,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class CameraController extends BaseController
 {
-    private $rtspUrl = 'rtsp://192.168.0.103:554/stream';
+    private $rtspUrl = 'rtsp://192.168.0.109:554/stream';
     
     // Working credentials for this camera
     private $rtspUsername = 'admin';
@@ -125,7 +126,7 @@ class CameraController extends BaseController
         $response->headers->set('Expires', '0');
         $response->headers->set('Connection', 'close');
 
-        $response->setCallback(function() {
+        $response->setCallback(function() use ($cameraId) {
             set_time_limit(0); // Remove PHP execution time limit
             ignore_user_abort(false); // Stop if client disconnects
             
@@ -777,5 +778,329 @@ class CameraController extends BaseController
         imagedestroy($image);
         
         return $imageData;
+    }
+
+    /**
+     * Proxy requests to camera web interface (handles CORS and authentication)
+     */
+    public function cameraProxy(Request $request)
+    {
+        $targetUrl = $request->input('url');
+        
+        if (!$targetUrl) {
+            return $this->sendError('Missing URL parameter', [], 400);
+        }
+
+        try {
+            // Parse the target URL to validate it's the camera
+            $parsedUrl = parse_url($targetUrl);
+            $allowedHost = '192.168.0.109';
+            
+            if (!isset($parsedUrl['host']) || $parsedUrl['host'] !== $allowedHost) {
+                return $this->sendError('Invalid camera URL', ['allowed_host' => $allowedHost], 403);
+            }
+
+            // Make request to camera with authentication
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $targetUrl);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+            curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST | CURLAUTH_BASIC);
+            curl_setopt($ch, CURLOPT_USERPWD, "{$this->rtspUsername}:{$this->rtspPassword}");
+            curl_setopt($ch, CURLOPT_HEADER, true);
+            
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+            
+            if (curl_errno($ch)) {
+                $error = curl_error($ch);
+                curl_close($ch);
+                return $this->sendError('Camera connection failed', ['error' => $error], 500);
+            }
+            
+            curl_close($ch);
+            
+            // Split headers and body
+            $headers = substr($response, 0, $headerSize);
+            $body = substr($response, $headerSize);
+            
+            // Parse headers
+            $headerLines = explode("\r\n", $headers);
+            $responseHeaders = [];
+            foreach ($headerLines as $line) {
+                if (strpos($line, ':') !== false) {
+                    list($key, $value) = explode(':', $line, 2);
+                    $responseHeaders[trim($key)] = trim($value);
+                }
+            }
+            
+            // Create response with appropriate headers
+            $contentType = $responseHeaders['Content-Type'] ?? 'text/html';
+            
+            return response($body, $httpCode)
+                ->header('Content-Type', $contentType)
+                ->header('Access-Control-Allow-Origin', '*')
+                ->header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+                
+        } catch (\Exception $e) {
+            return $this->sendError('Proxy request failed', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    // ==================== ZKTeco Camera Methods ====================
+
+    /**
+     * ZKTeco camera test connection
+     */
+    public function zktecoTestConnection(Request $request)
+    {
+        try {
+            $cameraService = new ZKTecoCameraService(
+                $request->input('ip'),
+                $request->input('http_port'),
+                $request->input('rtsp_port'),
+                $request->input('username'),
+                $request->input('password')
+            );
+
+            $result = $cameraService->testConnection();
+            
+            if ($result['success']) {
+                return $this->sendResponse($result, 'ZKTeco camera connection successful');
+            }
+
+            return $this->sendError('ZKTeco camera connection failed', $result, 422);
+            
+        } catch (\Exception $e) {
+            return $this->sendError('ZKTeco connection test error', [
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ZKTeco camera configuration
+     */
+    public function zktecoConfig()
+    {
+        try {
+            $cameraService = new ZKTecoCameraService();
+            $config = $cameraService->getConfig();
+            
+            return $this->sendResponse($config, 'ZKTeco camera configuration retrieved');
+            
+        } catch (\Exception $e) {
+            return $this->sendError('Failed to get ZKTeco configuration', [
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ZKTeco camera snapshot
+     */
+    public function zktecoSnapshot(Request $request)
+    {
+        try {
+            $cameraService = new ZKTecoCameraService(
+                $request->input('ip'),
+                $request->input('http_port'),
+                $request->input('rtsp_port'),
+                $request->input('username'),
+                $request->input('password')
+            );
+
+            $result = $cameraService->getSnapshot();
+            
+            if ($result['success']) {
+                return response($result['data'])
+                    ->header('Content-Type', $result['content_type'])
+                    ->header('Cache-Control', 'no-cache, no-store, must-revalidate')
+                    ->header('Pragma', 'no-cache')
+                    ->header('Expires', '0')
+                    ->header('Access-Control-Allow-Origin', '*');
+            }
+
+            return $this->sendError('Failed to capture ZKTeco snapshot', $result, 422);
+            
+        } catch (\Exception $e) {
+            return $this->sendError('ZKTeco snapshot error', [
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ZKTeco RTSP URL generator
+     */
+    public function zktecoRtspUrl(Request $request)
+    {
+        try {
+            $streamType = $request->input('stream_type', 'main');
+            
+            $cameraService = new ZKTecoCameraService(
+                $request->input('ip'),
+                $request->input('http_port'),
+                $request->input('rtsp_port'),
+                $request->input('username'),
+                $request->input('password')
+            );
+
+            $rtspUrl = $cameraService->getRtspUrl($streamType);
+            $webUrl = $cameraService->getWebInterfaceUrl();
+            
+            return $this->sendResponse([
+                'rtsp_url' => $rtspUrl,
+                'web_interface_url' => $webUrl,
+                'stream_type' => $streamType,
+                'config' => $cameraService->getConfig()
+            ], 'ZKTeco RTSP URLs generated');
+            
+        } catch (\Exception $e) {
+            return $this->sendError('Failed to generate ZKTeco RTSP URL', [
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ZKTeco device information
+     */
+    public function zktecoDeviceInfo(Request $request)
+    {
+        try {
+            $cameraService = new ZKTecoCameraService(
+                $request->input('ip'),
+                $request->input('http_port'),
+                $request->input('rtsp_port'),
+                $request->input('username'),
+                $request->input('password')
+            );
+
+            $result = $cameraService->getDeviceInfo();
+            
+            if ($result['success']) {
+                return $this->sendResponse($result, 'ZKTeco device information retrieved');
+            }
+
+            return $this->sendError('Failed to get ZKTeco device info', $result, 422);
+            
+        } catch (\Exception $e) {
+            return $this->sendError('ZKTeco device info error', [
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ZKTeco credentials validation
+     */
+    public function zktecoValidateCredentials(Request $request)
+    {
+        $request->validate([
+            'ip' => 'required|ip',
+            'username' => 'required|string',
+            'password' => 'required|string',
+            'http_port' => 'sometimes|integer|min:1|max:65535',
+            'rtsp_port' => 'sometimes|integer|min:1|max:65535',
+        ]);
+
+        try {
+            $cameraService = new ZKTecoCameraService(
+                $request->input('ip'),
+                $request->input('http_port', 80),
+                $request->input('rtsp_port', 554),
+                $request->input('username'),
+                $request->input('password')
+            );
+
+            $result = $cameraService->validateCredentials();
+            
+            if ($result['success']) {
+                return $this->sendResponse($result, 'ZKTeco credentials validated successfully');
+            }
+
+            return $this->sendError('ZKTeco credentials validation failed', $result, 422);
+            
+        } catch (\Exception $e) {
+            return $this->sendError('ZKTeco credentials validation error', [
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ZKTeco MJPEG stream proxy
+     */
+    public function zktecoMjpegStream(Request $request)
+    {
+        try {
+            $cameraService = new ZKTecoCameraService(
+                $request->input('ip'),
+                $request->input('http_port'),
+                $request->input('rtsp_port'),
+                $request->input('username'),
+                $request->input('password')
+            );
+
+            // Test connection first
+            $connectionTest = $cameraService->testConnection();
+            if (!$connectionTest['success']) {
+                return $this->sendError('Cannot connect to ZKTeco camera', $connectionTest, 503);
+            }
+
+            $response = new StreamedResponse();
+            $response->headers->set('Content-Type', 'multipart/x-mixed-replace; boundary=zktecoframe');
+            $response->headers->set('Cache-Control', 'no-cache, no-store, must-revalidate');
+            $response->headers->set('Pragma', 'no-cache');
+            $response->headers->set('Expires', '0');
+            $response->headers->set('Connection', 'close');
+            $response->headers->set('Access-Control-Allow-Origin', '*');
+
+            $response->setCallback(function() use ($cameraService) {
+                set_time_limit(0);
+                ignore_user_abort(false);
+                
+                $mjpegUrl = $cameraService->getHttpUrl('/cgi-bin/mjpeg');
+                $authHeaders = $cameraService->getAuthHeaders();
+                
+                // Use cURL for streaming
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, $mjpegUrl);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    'Authorization: ' . $authHeaders['Authorization'],
+                    'User-Agent: ' . $authHeaders['User-Agent'],
+                ]);
+                curl_setopt($ch, CURLOPT_WRITEFUNCTION, function($ch, $data) {
+                    if (connection_aborted()) {
+                        return -1;
+                    }
+                    echo $data;
+                    ob_flush();
+                    flush();
+                    return strlen($data);
+                });
+                curl_setopt($ch, CURLOPT_TIMEOUT, 0);
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                
+                curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                
+                if ($httpCode !== 200) {
+                    echo "data: Camera stream error (HTTP $httpCode)\n\n";
+                }
+            });
+
+            return $response;
+            
+        } catch (\Exception $e) {
+            return $this->sendError('ZKTeco MJPEG stream error', [
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }

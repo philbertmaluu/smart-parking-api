@@ -146,7 +146,7 @@
     <div class="container">
         <div class="header">
             <h1>🔧 Camera Diagnostic Tool</h1>
-            <p>Comprehensive analysis of your RTSP camera at <strong>192.168.0.103</strong></p>
+            <p>Comprehensive analysis of your RTSP camera at <strong>192.168.0.109</strong></p>
         </div>
 
         <div class="card">
@@ -181,7 +181,7 @@
 
             <h3>Quick Access Options:</h3>
             <div style="margin: 20px 0;">
-                <a href="http://192.168.0.103" target="_blank" class="btn btn-success">
+                <a href="http://192.168.0.109" target="_blank" class="btn btn-success">
                     🌍 Open Camera Web Interface
                 </a>
                 <button onclick="copyRTSPURL()" class="btn">
@@ -215,9 +215,9 @@
                     <li>Go to <strong>Media → Open Network Stream</strong></li>
                     <li>Enter one of these URLs:</li>
                 </ol>
-                <div class="url-box">rtsp://192.168.0.103:554/</div>
-                <div class="url-box">rtsp://192.168.0.103:554/stream</div>
-                <div class="url-box">rtsp://192.168.0.103:554/live</div>
+                <div class="url-box">rtsp://192.168.0.109:554/</div>
+                <div class="url-box">rtsp://192.168.0.109:554/stream</div>
+                <div class="url-box">rtsp://192.168.0.109:554/live</div>
                 <p>VLC will prompt for credentials if needed.</p>
             </div>
 
@@ -237,15 +237,15 @@
             <p>Use these commands to test the stream manually:</p>
             
             <h3>FFplay (if you have FFmpeg):</h3>
-            <pre>ffplay rtsp://192.168.0.103:554/</pre>
+            <pre>ffplay rtsp://192.168.0.109:554/</pre>
             
             <h3>FFprobe (to get stream info):</h3>
-            <pre>ffprobe rtsp://192.168.0.103:554/</pre>
+            <pre>ffprobe rtsp://192.168.0.109:554/</pre>
             
             <h3>Curl (to test HTTP streams):</h3>
-            <pre>curl -I http://192.168.0.103/mjpeg
-curl -I http://192.168.0.103/video.mjpg
-curl -I http://192.168.0.103/stream</pre>
+            <pre>curl -I http://192.168.0.109/mjpeg
+curl -I http://192.168.0.109/video.mjpg
+curl -I http://192.168.0.109/stream</pre>
         </div>
 
         <div class="card">
@@ -258,7 +258,7 @@ curl -I http://192.168.0.103/stream</pre>
                 </tr>
                 <tr>
                     <td>Camera IP</td>
-                    <td>192.168.0.103</td>
+                    <td>192.168.0.109</td>
                     <td>✅ Reachable</td>
                 </tr>
                 <tr>
@@ -309,7 +309,7 @@ curl -I http://192.168.0.103/stream</pre>
 
     <script>
         function copyRTSPURL() {
-            const url = 'rtsp://192.168.0.103:554/';
+            const url = 'rtsp://192.168.0.109:554/';
             navigator.clipboard.writeText(url).then(() => {
                 alert('RTSP URL copied to clipboard!');
             }).catch(() => {
@@ -320,13 +320,13 @@ curl -I http://192.168.0.103/stream</pre>
         function downloadVLCPlaylist() {
             const playlistContent = `#EXTM3U
 #EXTINF:-1,Camera Stream (Default Path)
-rtsp://192.168.0.103:554/
+rtsp://192.168.0.109:554/
 #EXTINF:-1,Camera Stream (Stream Path)
-rtsp://192.168.0.103:554/stream
+rtsp://192.168.0.109:554/stream
 #EXTINF:-1,Camera Stream (Live Path)
-rtsp://192.168.0.103:554/live
+rtsp://192.168.0.109:554/live
 #EXTINF:-1,Camera Stream (Stream1 Path)
-rtsp://192.168.0.103:554/stream1`;
+rtsp://192.168.0.109:554/stream1`;
             
             const blob = new Blob([playlistContent], { type: 'application/vnd.apple.mpegurl' });
             const url = URL.createObjectURL(blob);

@@ -135,15 +135,15 @@
     <div class="container">
         <header style="margin-bottom: 32px;">
             <h1>Smart Parking Camera Stream (Simple)</h1>
-            <div class="rtsp-url">RTSP URL: rtsp://192.168.0.103:554/</div>
+            <div class="rtsp-url">RTSP URL: rtsp://192.168.0.109:554/</div>
         </header>
 
         <div class="instructions">
             <h3>How to View Your RTSP Stream</h3>
             <p>Since RTSP isn't natively supported in web browsers, here are several options to view your stream:</p>
             <ul>
-                <li><strong>VLC Media Player:</strong> Open VLC → Media → Open Network Stream → Enter: rtsp://192.168.0.103:554/</li>
-                <li><strong>FFplay (if you have FFmpeg):</strong> Run: <code>ffplay rtsp://192.168.0.103:554/</code></li>
+                <li><strong>VLC Media Player:</strong> Open VLC → Media → Open Network Stream → Enter: rtsp://192.168.0.109:554/</li>
+                <li><strong>FFplay (if you have FFmpeg):</strong> Run: <code>ffplay rtsp://192.168.0.109:554/</code></li>
                 <li><strong>Install FFmpeg for web streaming:</strong> Run <code>brew install ffmpeg</code> to enable web streaming features</li>
                 <li><strong>QuickTime Player (macOS):</strong> File → Open Location → Enter the RTSP URL</li>
             </ul>
@@ -224,10 +224,10 @@
                 <pre style="margin: 8px 0; padding: 8px; background: #e5e7eb; border-radius: 4px;">brew install ffmpeg</pre>
                 
                 <p><strong>2. Test the stream:</strong></p>
-                <pre style="margin: 8px 0; padding: 8px; background: #e5e7eb; border-radius: 4px;">ffplay rtsp://192.168.0.103:554/</pre>
+                <pre style="margin: 8px 0; padding: 8px; background: #e5e7eb; border-radius: 4px;">ffplay rtsp://192.168.0.109:554/</pre>
                 
                 <p><strong>3. Convert to web-friendly format (example):</strong></p>
-                <pre style="margin: 8px 0; padding: 8px; background: #e5e7eb; border-radius: 4px;">ffmpeg -i rtsp://192.168.0.103:554/ -f mjpeg -q:v 3 -r 10 http://localhost:8080/stream.mjpg</pre>
+                <pre style="margin: 8px 0; padding: 8px; background: #e5e7eb; border-radius: 4px;">ffmpeg -i rtsp://192.168.0.109:554/ -f mjpeg -q:v 3 -r 10 http://localhost:8080/stream.mjpg</pre>
                 
                 <p><strong>4. Access your Laravel camera page:</strong></p>
                 <pre style="margin: 8px 0; padding: 8px; background: #e5e7eb; border-radius: 4px;">http://localhost:8000/camera-stream</pre>
@@ -236,8 +236,8 @@
     </div>
 
     <script>
-        const rtspUrl = 'rtsp://192.168.0.103:554/';
-        const cameraIP = '192.168.0.103';
+        const rtspUrl = 'rtsp://192.168.0.109:554/';
+        const cameraIP = '192.168.0.109';
 
         function testRTSPConnection() {
             showStatus('connectionStatus', 'Testing RTSP connection...', 'info');

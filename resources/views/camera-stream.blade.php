@@ -108,7 +108,7 @@
     <div class="container">
         <header style="margin-bottom: 32px;">
             <h1>Smart Parking Camera Stream</h1>
-            <div class="rtsp-url">RTSP URL: rtsp://192.168.0.103:554/</div>
+            <div class="rtsp-url">RTSP URL: rtsp://192.168.0.109:554/</div>
         </header>
 
         <!-- Method 1: HLS Stream (Requires FFmpeg conversion) -->

@@ -421,7 +421,7 @@
                 <div class="stream-info">
                     <strong>Camera Information:</strong>
                     <div class="url" id="cameraInfo">
-                        IP: 192.168.0.103:554<br>
+                        IP: 192.168.0.109:554<br>
                         Protocol: RTSP<br>
                         Authentication: Digest
                     </div>
@@ -445,7 +445,7 @@
         const cameraCredentials = {
             username: 'admin',
             password: 'Password123!',
-            ip: '192.168.0.103',
+            ip: '192.168.0.109',
             port: '554',
             path: '/stream'
         };
