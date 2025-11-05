@@ -20,6 +20,7 @@ use App\Http\Controllers\API\GateControlController;
 use App\Http\Controllers\API\ReceiptController;
 use App\Http\Controllers\API\CameraController;
 use App\Http\Controllers\API\TollController;
+use App\Http\Controllers\API\GateDeviceController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -65,6 +66,13 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('gates/type/entry', [GateController::class, 'getEntryGates']);
         Route::get('gates/type/exit', [GateController::class, 'getExitGates']);
         Route::get('gates/type/both', [GateController::class, 'getBothGates']);
+
+        // Gate Device routes (Hardware Integration)
+        Route::apiResource('gate-devices', GateDeviceController::class);
+        Route::get('gate-devices/gate/{gateId}', [GateDeviceController::class, 'getByGate']);
+        Route::get('gate-devices/type/{type}', [GateDeviceController::class, 'getByType']);
+        Route::get('gate-devices/active/list', [GateDeviceController::class, 'getActiveList']);
+        Route::post('gate-devices/{id}/test-connection', [GateDeviceController::class, 'testConnection']);
 
         // Vehicle routes
         Route::get('vehicles/search/plate/{plateNumber}', [VehicleController::class, 'searchByPlate']);
