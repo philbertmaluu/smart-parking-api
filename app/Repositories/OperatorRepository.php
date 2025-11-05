@@ -127,7 +127,7 @@ class OperatorRepository
             ->byRole('Gate Operator')
             ->whereHas('assignedStations', function ($query) use ($stationId) {
                 $query->where('station_id', $stationId)
-                    ->where('operator_station.is_active', true);
+                    ->wherePivot('is_active', true);
             })
             ->with(['role', 'assignedStations' => function ($query) use ($stationId) {
                 $query->where('station_id', $stationId);
@@ -149,7 +149,7 @@ class OperatorRepository
         }
 
         return $user->assignedStations()
-            ->where('operator_station.is_active', true)
+            ->wherePivot('is_active', true)
             ->get();
     }
 
@@ -170,7 +170,7 @@ class OperatorRepository
         // Check if operator is assigned to this station
         $isAssigned = $user->assignedStations()
             ->where('station_id', $stationId)
-            ->where('operator_station.is_active', true)
+            ->wherePivot('is_active', true)
             ->exists();
 
         if (!$isAssigned) {
@@ -193,20 +193,26 @@ class OperatorRepository
     public function getAvailableGatesForLoggedInOperator(int $userId): Collection
     {
         $user = $this->userModel->find($userId);
+        
         if (!$user || !$user->hasRole('Gate Operator')) {
             return collect([]);
         }
 
-        // Get operator's assigned stations
+        // Get operator's assigned stations using the relationship with pivot filtering
+        // Use wherePivot for pivot table columns
         $assignedStations = $user->assignedStations()
-            ->where('operator_station.is_active', true)
+            ->wherePivot('is_active', true)
             ->get();
 
         if ($assignedStations->isEmpty()) {
             return collect([]);
         }
 
-        $stationIds = $assignedStations->pluck('id');
+        $stationIds = $assignedStations->pluck('id')->toArray();
+        
+        if (empty($stationIds)) {
+            return collect([]);
+        }
         
         // Get gates that are currently selected by other operators in the same stations
         $occupiedGateIds = DB::table('operator_station')
@@ -215,16 +221,46 @@ class OperatorRepository
             ->where('is_active', true)
             ->whereNotNull('current_gate_id')
             ->pluck('current_gate_id')
-            ->unique();
+            ->unique()
+            ->toArray();
 
         // Get all active gates for assigned stations, excluding occupied ones
         $availableGates = Gate::whereIn('station_id', $stationIds)
             ->where('is_active', true)
-            ->whereNotIn('id', $occupiedGateIds)
+            ->when(!empty($occupiedGateIds), function ($query) use ($occupiedGateIds) {
+                return $query->whereNotIn('id', $occupiedGateIds);
+            })
             ->with('station')
             ->get();
 
         return $availableGates;
+    }
+
+    /**
+     * Get the currently selected gate for an operator
+     *
+     * @param int $userId
+     * @return Gate|null
+     */
+    public function getSelectedGateForOperator(int $userId): ?Gate
+    {
+        $user = $this->userModel->find($userId);
+        if (!$user || !$user->hasRole('Gate Operator')) {
+            return null;
+        }
+
+        // Get operator's assigned stations with current gate using wherePivot
+        $assignedStation = $user->assignedStations()
+            ->wherePivot('is_active', true)
+            ->wherePivotNotNull('current_gate_id')
+            ->first();
+
+        if (!$assignedStation || !$assignedStation->pivot->current_gate_id) {
+            return null;
+        }
+
+        $gateId = $assignedStation->pivot->current_gate_id;
+        return Gate::with('station')->find($gateId);
     }
 
     /**
@@ -245,7 +281,7 @@ class OperatorRepository
         // Verify operator is assigned to this station
         $isAssigned = $user->assignedStations()
             ->where('station_id', $stationId)
-            ->where('operator_station.is_active', true)
+            ->wherePivot('is_active', true)
             ->exists();
 
         if (!$isAssigned) {
@@ -267,6 +303,7 @@ class OperatorRepository
             ->where('station_id', $stationId)
             ->where('user_id', '!=', $userId)
             ->where('is_active', true)
+            ->whereNotNull('current_gate_id')
             ->where('current_gate_id', $gateId)
             ->exists();
 

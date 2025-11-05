@@ -82,6 +82,13 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('operators', [OperatorController::class, 'index']);
         Route::post('operators', [AuthController::class, 'createOperator']);
         Route::get('operators/all', [OperatorController::class, 'getAll']);
+        
+        // Logged-in operator routes (MUST come before parameterized routes)
+        Route::get('operators/me/available-gates', [OperatorController::class, 'getMyAvailableGates']);
+        Route::post('operators/me/select-gate', [OperatorController::class, 'selectGate']);
+        Route::get('operators/me/selected-gate/devices', [OperatorController::class, 'getMySelectedGateDevices']);
+        
+        // Parameterized operator routes (must come after 'me' routes)
         Route::get('operators/{operatorId}', [OperatorController::class, 'show']);
         Route::put('operators/{operatorId}', [AuthController::class, 'updateOperator']);
         Route::delete('operators/{operatorId}', [AuthController::class, 'deleteOperator']);
@@ -92,11 +99,6 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('operators/{operatorId}/available-gates', [OperatorController::class, 'getAvailableGates']);
         Route::post('operators/{operatorId}/assign-station', [OperatorController::class, 'assignStation']);
         Route::post('operators/{operatorId}/unassign-station', [OperatorController::class, 'unassignStation']);
-        
-        // Logged-in operator routes (for operators to manage their own gates)
-        Route::get('operators/me/available-gates', [OperatorController::class, 'getMyAvailableGates']);
-        Route::post('operators/me/select-gate', [OperatorController::class, 'selectGate']);
-        Route::get('operators/me/selected-gate/devices', [OperatorController::class, 'getMySelectedGateDevices']);
 
         // Vehicle routes
         Route::get('vehicles/search/plate/{plateNumber}', [VehicleController::class, 'searchByPlate']);

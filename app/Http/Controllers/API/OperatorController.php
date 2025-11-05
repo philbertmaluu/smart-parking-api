@@ -177,8 +177,29 @@ class OperatorController extends BaseController
                 return $this->sendError('Only Gate Operators can access this endpoint', [], 403);
             }
 
+            // Load assigned stations relationship using wherePivot for pivot columns
+            $user->load(['assignedStations' => function ($query) {
+                $query->wherePivot('is_active', true);
+            }]);
+
+            // Check if operator has assigned stations
+            if ($user->assignedStations->isEmpty()) {
+                return $this->sendResponse([
+                    'available_gates' => [],
+                    'selected_gate' => null,
+                    'message' => 'No stations assigned to this operator',
+                ], 'No stations assigned to operator');
+            }
+
             $gates = $this->operatorRepository->getAvailableGatesForLoggedInOperator($user->id);
-            return $this->sendResponse($gates, 'Available gates retrieved successfully');
+            
+            // Get the currently selected gate for the operator
+            $selectedGate = $this->operatorRepository->getSelectedGateForOperator($user->id);
+            
+            return $this->sendResponse([
+                'available_gates' => $gates,
+                'selected_gate' => $selectedGate,
+            ], 'Available gates retrieved successfully');
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving available gates', $e->getMessage(), 500);
         }
@@ -201,13 +222,18 @@ class OperatorController extends BaseController
             }
 
             $request->validate([
-                'station_id' => 'required|exists:stations,id',
                 'gate_id' => 'required|exists:gates,id',
             ]);
 
+            // Get the gate to find its station_id
+            $gate = \App\Models\Gate::find($request->gate_id);
+            if (!$gate) {
+                return $this->sendError('Gate not found', [], 404);
+            }
+
             $success = $this->operatorRepository->selectGateForOperator(
                 $user->id,
-                $request->station_id,
+                $gate->station_id,
                 $request->gate_id
             );
 
@@ -245,10 +271,10 @@ class OperatorController extends BaseController
                 return $this->sendError('Only Gate Operators can access this endpoint', [], 403);
             }
 
-            // Get operator's assigned stations with current gate
+            // Get operator's assigned stations with current gate using wherePivot
             $assignedStations = $user->assignedStations()
-                ->where('operator_station.is_active', true)
-                ->whereNotNull('operator_station.current_gate_id')
+                ->wherePivot('is_active', true)
+                ->wherePivotNotNull('current_gate_id')
                 ->get();
 
             if ($assignedStations->isEmpty()) {
