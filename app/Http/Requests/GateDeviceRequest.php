@@ -19,23 +19,20 @@ class GateDeviceRequest extends FormRequest
      */
     public function rules(): array
     {
+        $isUpdate = $this->isMethod('PUT') || $this->isMethod('PATCH');
+
         $rules = [
-            'gate_id' => 'required|exists:gates,id',
-            'device_type' => 'required|in:camera,boom_gate',
+            'gate_id' => $isUpdate ? 'sometimes|exists:gates,id' : 'required|exists:gates,id',
+            'device_type' => $isUpdate ? 'sometimes|in:camera,boom_gate' : 'required|in:camera,boom_gate',
             'name' => 'nullable|string|max:255',
-            'ip_address' => 'required|ip',
+            'ip_address' => $isUpdate ? 'sometimes|ip' : 'required|ip',
             'http_port' => 'nullable|integer|min:1|max:65535',
             'rtsp_port' => 'nullable|integer|min:1|max:65535',
-            'username' => 'required|string|max:255',
-            'password' => 'required|string|max:255',
+            'username' => $isUpdate ? 'sometimes|string|max:255' : 'required|string|max:255',
+            'password' => $isUpdate ? 'nullable|string|max:255' : 'required|string|max:255',
             'direction' => 'nullable|in:entry,exit,both',
             'status' => 'nullable|in:active,inactive,maintenance,error',
         ];
-
-        // For update, password is optional
-        if ($this->isMethod('PUT') || $this->isMethod('PATCH')) {
-            $rules['password'] = 'nullable|string|max:255';
-        }
 
         return $rules;
     }
