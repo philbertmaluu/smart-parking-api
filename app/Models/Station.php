@@ -87,6 +87,18 @@ class Station extends Model
     }
 
     /**
+     * Get all operators assigned to this station.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     */
+    public function operators()
+    {
+        return $this->belongsToMany(User::class, 'operator_station')
+            ->withPivot('is_active', 'assigned_at', 'assigned_by')
+            ->withTimestamps();
+    }
+
+    /**
      * Scope a query to only include active stations.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query

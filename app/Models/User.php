@@ -148,6 +148,19 @@ class User extends Authenticatable
     }
 
     /**
+     * Get all stations assigned to this operator.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany
+     */
+    public function assignedStations()
+    {
+        return $this->belongsToMany(Station::class, 'operator_station')
+            ->withPivot('is_active', 'assigned_at', 'assigned_by')
+            ->withTimestamps();
+    }
+
+
+    /**
      * Scope a query to only include active users.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query

@@ -21,6 +21,7 @@ use App\Http\Controllers\API\ReceiptController;
 use App\Http\Controllers\API\CameraController;
 use App\Http\Controllers\API\TollController;
 use App\Http\Controllers\API\GateDeviceController;
+use App\Http\Controllers\API\OperatorController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -37,18 +38,6 @@ Route::prefix('toll-v1')->group(function () {
         Route::put('/profile', [AuthController::class, 'updateProfile']);
         Route::post('/change-password', [AuthController::class, 'changePassword']);
         Route::post('/refresh-token', [AuthController::class, 'refreshToken']);
-
-        // Operator management routes (Admin/Manager only)
-        Route::prefix('operators')->group(function () {
-            Route::get('/', [AuthController::class, 'getOperators']);
-            Route::post('/', [AuthController::class, 'createOperator']);
-            Route::get('/{id}', [AuthController::class, 'getOperator']);
-            Route::put('/{id}', [AuthController::class, 'updateOperator']);
-            Route::post('/{id}/activate', [AuthController::class, 'activateOperator']);
-            Route::post('/{id}/deactivate', [AuthController::class, 'deactivateOperator']);
-            Route::post('/{id}/reset-password', [AuthController::class, 'resetOperatorPassword']);
-            Route::delete('/{id}', [AuthController::class, 'deleteOperator']);
-        });
 
         // Roles
         Route::get('/roles', [AuthController::class, 'getRoles']);
@@ -73,6 +62,21 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('gate-devices/type/{type}', [GateDeviceController::class, 'getByType']);
         Route::get('gate-devices/active/list', [GateDeviceController::class, 'getActiveList']);
         Route::post('gate-devices/{id}/test-connection', [GateDeviceController::class, 'testConnection']);
+
+        // Operator routes (Operators Management)
+        Route::get('operators', [OperatorController::class, 'index']);
+        Route::post('operators', [AuthController::class, 'createOperator']);
+        Route::get('operators/all', [OperatorController::class, 'getAll']);
+        Route::get('operators/{operatorId}', [OperatorController::class, 'show']);
+        Route::put('operators/{operatorId}', [AuthController::class, 'updateOperator']);
+        Route::delete('operators/{operatorId}', [AuthController::class, 'deleteOperator']);
+        Route::post('operators/{operatorId}/activate', [AuthController::class, 'activateOperator']);
+        Route::post('operators/{operatorId}/deactivate', [AuthController::class, 'deactivateOperator']);
+        Route::post('operators/{operatorId}/reset-password', [AuthController::class, 'resetOperatorPassword']);
+        Route::get('operators/{operatorId}/stations', [OperatorController::class, 'getStations']);
+        Route::get('operators/{operatorId}/available-gates', [OperatorController::class, 'getAvailableGates']);
+        Route::post('operators/{operatorId}/assign-station', [OperatorController::class, 'assignStation']);
+        Route::post('operators/{operatorId}/unassign-station', [OperatorController::class, 'unassignStation']);
 
         // Vehicle routes
         Route::get('vehicles/search/plate/{plateNumber}', [VehicleController::class, 'searchByPlate']);
