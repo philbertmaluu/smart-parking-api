@@ -21,6 +21,7 @@ use App\Http\Controllers\API\ReceiptController;
 use App\Http\Controllers\API\CameraController;
 use App\Http\Controllers\API\TollController;
 use App\Http\Controllers\API\GateDeviceController;
+use App\Http\Controllers\API\OperatorController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
