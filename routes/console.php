@@ -2,7 +2,16 @@
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+// Schedule the passage total amount update command
+// Run daily at 2:00 AM to update any passages that may have incorrect amounts
+Schedule::command('passages:update-total-amounts')
+    ->dailyAt('02:00')
+    ->timezone('Africa/Dar_es_Salaam')
+    ->withoutOverlapping()
+    ->runInBackground();

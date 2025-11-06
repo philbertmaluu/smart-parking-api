@@ -140,15 +140,59 @@ class VehiclePassageRepository
         // Calculate duration
         $data['duration_minutes'] = $passage->entry_time->diffInMinutes($data['exit_time']);
 
-        // For now, keep the same pricing as entry
-        // Future enhancement: implement time-based pricing using PricingService
-        // $pricing = $this->pricingService->calculatePricingForExit($passage, $data);
-        // $data['base_amount'] = $pricing['base_amount'];
-        // $data['discount_amount'] = $pricing['discount_amount'];
-        // $data['total_amount'] = $pricing['total_amount'];
+        // Calculate total amount based on duration (hours spent)
+        $entryTime = $passage->entry_time;
+        $exitTime = $data['exit_time'];
+        $hoursSpent = $entryTime->diffInHours($exitTime, true);
+        
+        // Calculate hours to charge based on smart charging rules:
+        // - Minimum charge: 1 hour
+        // - Up to 1.5 hours: charge 1 hour
+        // - From 1.5 to 2 hours: charge 2 hours
+        // - More than 2 hours: round up to next full hour
+        $hoursToCharge = $this->calculateHoursToCharge($hoursSpent);
+        
+        // Calculate total amount: base_amount * hours_to_charge
+        $data['total_amount'] = $passage->base_amount * $hoursToCharge;
 
         $passage->update($data);
         return $passage->fresh();
+    }
+
+    /**
+     * Calculate total billable hours based on parking time and smart charging rules.
+     *
+     * Charging Rules:
+     * - Minimum charge — always 1 hour
+     *   Even if someone parks for 5 minutes or 30 minutes, they must pay for 1 hour.
+     * - Up to 1 hour 30 minutes → Still charge only 1 hour
+     *   Small "grace period" makes customers feel treated fairly.
+     * - From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
+     * - More than 2 hours → Round up to the next full hour
+     *   After 2 hours, charge by each full hour — always rounding up.
+     *
+     * @param float $hoursSpent  Actual number of hours spent (e.g., 1.25 = 1h15m)
+     * @return int  Billable hours to charge
+     */
+    private function calculateHoursToCharge(float $hoursSpent): int
+    {
+        // Minimum charge — always 1 hour
+        if ($hoursSpent <= 0) {
+            return 1;
+        }
+
+        // Up to 1 hour 30 minutes → Still charge only 1 hour
+        if ($hoursSpent <= 1.5) {
+            return 1;
+        }
+
+        // From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
+        if ($hoursSpent < 2.0) {
+            return 2;
+        }
+
+        // More than 2 hours → Round up to the next full hour
+        return (int) ceil($hoursSpent);
     }
 
     /**
