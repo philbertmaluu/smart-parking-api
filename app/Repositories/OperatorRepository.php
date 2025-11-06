@@ -321,6 +321,40 @@ class OperatorRepository
     }
 
     /**
+     * Deselect gate for an operator (clear current_gate_id)
+     *
+     * @param int $userId
+     * @return bool
+     */
+    public function deselectGateForOperator(int $userId): bool
+    {
+        $user = $this->userModel->find($userId);
+        if (!$user || !$user->hasRole('Gate Operator')) {
+            return false;
+        }
+
+        // Get all assigned stations with current gate
+        $assignedStations = $user->assignedStations()
+            ->wherePivot('is_active', true)
+            ->wherePivotNotNull('current_gate_id')
+            ->get();
+
+        if ($assignedStations->isEmpty()) {
+            return false;
+        }
+
+        // Clear current_gate_id for all assigned stations
+        foreach ($assignedStations as $station) {
+            $user->assignedStations()->updateExistingPivot($station->id, [
+                'current_gate_id' => null,
+                'gate_selected_at' => null,
+            ]);
+        }
+
+        return true;
+    }
+
+    /**
      * Search operators
      *
      * @param string $search

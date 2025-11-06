@@ -296,5 +296,34 @@ class OperatorController extends BaseController
             return $this->sendError('Error retrieving gate devices', $e->getMessage(), 500);
         }
     }
+
+    /**
+     * Deselect gate for logged-in operator
+     */
+    public function deselectGate(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return $this->sendError('Unauthorized', [], 401);
+            }
+
+            if (!$user->hasRole('Gate Operator')) {
+                return $this->sendError('Only Gate Operators can access this endpoint', [], 403);
+            }
+
+            $success = $this->operatorRepository->deselectGateForOperator($user->id);
+
+            if (!$success) {
+                return $this->sendError('Failed to deselect gate. No gate was selected', [], 400);
+            }
+
+            $operator = $this->operatorRepository->getOperatorByIdWithRelations($user->id);
+            return $this->sendResponse($operator, 'Gate deselected successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error deselecting gate', $e->getMessage(), 500);
+        }
+    }
 }
 

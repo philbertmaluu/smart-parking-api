@@ -86,6 +86,7 @@ Route::prefix('toll-v1')->group(function () {
         // Logged-in operator routes (MUST come before parameterized routes)
         Route::get('operators/me/available-gates', [OperatorController::class, 'getMyAvailableGates']);
         Route::post('operators/me/select-gate', [OperatorController::class, 'selectGate']);
+        Route::post('operators/me/deselect-gate', [OperatorController::class, 'deselectGate']);
         Route::get('operators/me/selected-gate/devices', [OperatorController::class, 'getMySelectedGateDevices']);
         
         // Parameterized operator routes (must come after 'me' routes)
