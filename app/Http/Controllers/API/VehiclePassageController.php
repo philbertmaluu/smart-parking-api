@@ -281,11 +281,20 @@ class VehiclePassageController extends BaseController
     /**
      * Get active passages for monitoring
      */
-    public function getActivePassages()
+    public function getActivePassages(Request $request)
     {
         try {
-            $result = $this->passageService->getActivePassagesForMonitoring();
-            return $this->sendResponse($result['data'], 'Active passages retrieved successfully');
+            $perPage = $request->get('per_page', null);
+            
+            if ($perPage) {
+                // Return paginated results
+                $passages = $this->passageRepository->getActivePassages((int)$perPage);
+                return $this->sendResponse($passages, 'Active passages retrieved successfully');
+            } else {
+                // Return all results (backward compatibility)
+                $result = $this->passageService->getActivePassagesForMonitoring();
+                return $this->sendResponse($result['data'], 'Active passages retrieved successfully');
+            }
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving active passages', $e->getMessage(), 500);
         }

@@ -88,6 +88,7 @@ Route::prefix('toll-v1')->group(function () {
         Route::post('operators/me/select-gate', [OperatorController::class, 'selectGate']);
         Route::post('operators/me/deselect-gate', [OperatorController::class, 'deselectGate']);
         Route::get('operators/me/selected-gate/devices', [OperatorController::class, 'getMySelectedGateDevices']);
+        Route::get('operators/me/recent-vehicles', [OperatorController::class, 'getMyRecentVehicles']);
         
         // Parameterized operator routes (must come after 'me' routes)
         Route::get('operators/{operatorId}', [OperatorController::class, 'show']);

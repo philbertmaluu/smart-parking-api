@@ -6,6 +6,7 @@ use App\Http\Controllers\BaseController;
 use App\Http\Requests\OperatorRequest;
 use App\Repositories\OperatorRepository;
 use App\Repositories\GateDeviceRepository;
+use App\Repositories\VehiclePassageRepository;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -13,11 +14,16 @@ class OperatorController extends BaseController
 {
     protected $operatorRepository;
     protected $gateDeviceRepository;
+    protected $vehiclePassageRepository;
 
-    public function __construct(OperatorRepository $operatorRepository, GateDeviceRepository $gateDeviceRepository)
-    {
+    public function __construct(
+        OperatorRepository $operatorRepository, 
+        GateDeviceRepository $gateDeviceRepository,
+        VehiclePassageRepository $vehiclePassageRepository
+    ) {
         $this->operatorRepository = $operatorRepository;
         $this->gateDeviceRepository = $gateDeviceRepository;
+        $this->vehiclePassageRepository = $vehiclePassageRepository;
     }
 
     /**
@@ -323,6 +329,31 @@ class OperatorController extends BaseController
             return $this->sendResponse($operator, 'Gate deselected successfully');
         } catch (\Exception $e) {
             return $this->sendError('Error deselecting gate', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get recent vehicles (parked and exited) for logged-in operator
+     */
+    public function getMyRecentVehicles(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return $this->sendError('Unauthorized', [], 401);
+            }
+
+            if (!$user->hasRole('Gate Operator')) {
+                return $this->sendError('Only Gate Operators can access this endpoint', [], 403);
+            }
+
+            $limit = $request->get('limit', 20);
+            $vehicles = $this->vehiclePassageRepository->getRecentVehiclesForOperator($user->id, $limit);
+
+            return $this->sendResponse($vehicles, 'Recent vehicles retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving recent vehicles', $e->getMessage(), 500);
         }
     }
 }

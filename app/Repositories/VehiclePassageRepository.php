@@ -154,16 +154,23 @@ class VehiclePassageRepository
     /**
      * Get active passages (not completed)
      *
-     * @return Collection
+     * @param int|null $perPage
+     * @return Collection|LengthAwarePaginator
      */
-    public function getActivePassages(): Collection
+    public function getActivePassages(?int $perPage = null)
     {
-        return $this->model->with([
+        $query = $this->model->with([
             'vehicle.bodyType',
             'entryGate',
             'entryStation',
             'entryOperator'
-        ])->whereNull('exit_time')->orderBy('entry_time', 'desc')->get();
+        ])->whereNull('exit_time')->orderBy('entry_time', 'desc');
+        
+        if ($perPage) {
+            return $query->paginate($perPage);
+        }
+        
+        return $query->get();
     }
 
     /**
@@ -293,6 +300,52 @@ class VehiclePassageRepository
             'toll_passages' => $passages->where('passage_type', 'toll')->count(),
             'free_passages' => $passages->where('passage_type', 'free')->count(),
             'exempted_passages' => $passages->where('passage_type', 'exempted')->count(),
+        ];
+    }
+
+    /**
+     * Get recent vehicles (parked and exited) for a specific operator
+     *
+     * @param int $operatorId
+     * @param int $limit
+     * @return array
+     */
+    public function getRecentVehiclesForOperator(int $operatorId, int $limit = 20): array
+    {
+        // Get parked vehicles (active passages) where operator is entry operator
+        $parkedVehicles = $this->model->with([
+            'vehicle.bodyType',
+            'entryGate',
+            'entryStation',
+            'paymentType'
+        ])
+        ->where('entry_operator_id', $operatorId)
+        ->whereNull('exit_time')
+        ->orderBy('entry_time', 'desc')
+        ->limit($limit)
+        ->get();
+
+        // Get recently exited vehicles where operator is entry or exit operator
+        $exitedVehicles = $this->model->with([
+            'vehicle.bodyType',
+            'entryGate',
+            'exitGate',
+            'entryStation',
+            'exitStation',
+            'paymentType'
+        ])
+        ->where(function ($query) use ($operatorId) {
+            $query->where('entry_operator_id', $operatorId)
+                  ->orWhere('exit_operator_id', $operatorId);
+        })
+        ->whereNotNull('exit_time')
+        ->orderBy('exit_time', 'desc')
+        ->limit($limit)
+        ->get();
+
+        return [
+            'parked' => $parkedVehicles,
+            'exited' => $exitedVehicles,
         ];
     }
 
