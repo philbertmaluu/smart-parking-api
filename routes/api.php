@@ -22,6 +22,7 @@ use App\Http\Controllers\API\CameraController;
 use App\Http\Controllers\API\TollController;
 use App\Http\Controllers\API\GateDeviceController;
 use App\Http\Controllers\API\OperatorController;
+use App\Http\Controllers\API\CameraDetectionController;
 
 // Public routes
 Route::prefix('toll-v1')->group(function () {
@@ -206,6 +207,7 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('vehicle-passages/active/list', [VehiclePassageController::class, 'getActivePassages']);
         Route::get('vehicle-passages/completed/list', [VehiclePassageController::class, 'getCompletedPassages']);
         Route::get('vehicle-passages/statistics', [VehiclePassageController::class, 'getStatistics']);
+        Route::get('vehicle-passages/dashboard-summary', [VehiclePassageController::class, 'getDashboardSummary']);
         Route::put('vehicle-passages/{id}/status', [VehiclePassageController::class, 'updateStatus']);
         Route::get('vehicle-passages/search', [VehiclePassageController::class, 'search']);
 
@@ -242,6 +244,18 @@ Route::prefix('toll-v1')->group(function () {
         Route::post('stream/hls/{cameraId?}/stop', [CameraController::class, 'stopHlsStream']);
         Route::get('camera/test-connection', [CameraController::class, 'testConnection']);
         Route::get('camera/status/{cameraId?}', [CameraController::class, 'getStatus']);
+
+        // Camera Detection routes (Plate number detection logs)
+        Route::prefix('camera-detection')->group(function () {
+            Route::get('/fetch', [CameraDetectionController::class, 'fetchLogs']);
+            Route::post('/store', [CameraDetectionController::class, 'storeLogs']);
+            Route::post('/fetch-and-store', [CameraDetectionController::class, 'fetchAndStoreLogs']);
+            Route::get('/logs', [CameraDetectionController::class, 'getStoredLogs']);
+            Route::get('/logs/unprocessed', [CameraDetectionController::class, 'getUnprocessedLogs']);
+            Route::get('/logs/plate/{plateNumber}', [CameraDetectionController::class, 'getLogsByPlateNumber']);
+            Route::put('/logs/{id}/mark-processed', [CameraDetectionController::class, 'markAsProcessed']);
+            Route::get('/config', [CameraDetectionController::class, 'getConfig']);
+        });
 
         // Toll Service routes (Simplified toll system)
         Route::prefix('toll')->group(function () {

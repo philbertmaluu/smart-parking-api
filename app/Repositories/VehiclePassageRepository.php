@@ -348,6 +348,49 @@ class VehiclePassageRepository
     }
 
     /**
+     * Get dashboard summary statistics
+     * Provides comprehensive stats for dashboard cards
+     *
+     * @return array
+     */
+    public function getDashboardSummary(): array
+    {
+        $today = now()->startOfDay();
+        $todayEnd = now()->endOfDay();
+
+        // Total passages (all time)
+        $totalPassages = $this->model->count();
+
+        // Active passages (currently parked)
+        $activePassages = $this->model->whereNull('exit_time')->count();
+
+        // Completed today (exited today)
+        $completedToday = $this->model->whereNotNull('exit_time')
+            ->whereDate('exit_time', $today->toDateString())
+            ->count();
+
+        // Total revenue (all time from completed passages)
+        $totalRevenue = $this->model->whereNotNull('exit_time')
+            ->sum('total_amount');
+
+        // Revenue today
+        $revenueToday = $this->model->whereNotNull('exit_time')
+            ->whereDate('exit_time', $today->toDateString())
+            ->sum('total_amount');
+
+        // Active passages count (for display)
+        $activeNow = $this->model->whereNull('exit_time')->count();
+
+        return [
+            'total_passages' => $totalPassages,
+            'active_passages' => $activeNow,
+            'completed_today' => $completedToday,
+            'total_revenue' => (float) $totalRevenue,
+            'revenue_today' => (float) $revenueToday,
+        ];
+    }
+
+    /**
      * Get recent vehicles (parked and exited) for a specific operator
      *
      * @param int $operatorId

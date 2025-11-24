@@ -333,6 +333,21 @@ class VehiclePassageController extends BaseController
     }
 
     /**
+     * Get dashboard summary statistics
+     * Provides quick stats for dashboard cards
+     */
+    public function getDashboardSummary()
+    {
+        try {
+            $summary = $this->passageRepository->getDashboardSummary();
+
+            return $this->sendResponse($summary, 'Dashboard summary retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving dashboard summary', $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * Update passage status
      */
     public function updateStatus(Request $request, $id)

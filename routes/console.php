@@ -15,3 +15,11 @@ Schedule::command('passages:update-total-amounts')
     ->timezone('Africa/Dar_es_Salaam')
     ->withoutOverlapping()
     ->runInBackground();
+
+// Schedule camera detection log fetching
+// Run every 5 minutes to fetch new plate number detections
+Schedule::command('camera:fetch-logs')
+    ->everyFiveMinutes()
+    ->timezone('Africa/Dar_es_Salaam')
+    ->withoutOverlapping()
+    ->runInBackground();
