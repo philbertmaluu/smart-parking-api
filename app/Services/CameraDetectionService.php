@@ -16,12 +16,14 @@ class CameraDetectionService
 {
     private string $cameraIp;
     private int $computerId;
+    private int $gateId;
     private CameraDetectionLogRepository $repository;
 
     public function __construct(CameraDetectionLogRepository $repository)
     {
         $this->cameraIp = env('CAMERA_IP', '192.168.0.109');
         $this->computerId = (int) env('CAMERA_COMPUTER_ID', 1);
+        $this->gateId = (int) env('CAMERA_GATE_ID', 1);
         $this->repository = $repository;
     }
 
@@ -225,6 +227,7 @@ class CameraDetectionService
     {
         return [
             'camera_detection_id' => $detection['id'] ?? null,
+            'gate_id' => $this->gateId,
             'numberplate' => $detection['numberplate'] ?? '',
             'originalplate' => $detection['originalplate'] ?? null,
             'detection_timestamp' => isset($detection['timestamp']) 
@@ -288,6 +291,7 @@ class CameraDetectionService
         return [
             'camera_ip' => $this->cameraIp,
             'computer_id' => $this->computerId,
+            'gate_id' => $this->gateId,
         ];
     }
 }
