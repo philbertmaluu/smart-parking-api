@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Services\CameraDetectionService;
+use App\Services\VehiclePassageService;
 use Illuminate\Support\Facades\Log;
 
 class FetchCameraData extends Command
@@ -30,14 +31,26 @@ class FetchCameraData extends Command
     protected $cameraDetectionService;
 
     /**
+     * Vehicle Passage Service
+     *
+     * @var VehiclePassageService
+     */
+    protected $vehiclePassageService;
+
+    /**
      * Create a new command instance.
      *
      * @param CameraDetectionService $cameraDetectionService
+     * @param VehiclePassageService $vehiclePassageService
      */
-    public function __construct(CameraDetectionService $cameraDetectionService)
+    public function __construct(CameraDetectionService $cameraDetectionService, VehiclePassageService $vehiclePassageService)
     {
         parent::__construct();
         $this->cameraDetectionService = $cameraDetectionService;
+        $this->vehiclePassageService = $vehiclePassageService;
+        
+        // Set VehiclePassageService in CameraDetectionService for passage processing
+        $this->cameraDetectionService->setPassageService($this->vehiclePassageService);
     }
 
     /**
@@ -57,9 +70,6 @@ class FetchCameraData extends Command
             // Fetch and store camera logs
             $result = $this->cameraDetectionService->fetchAndStoreLogs($dateTime);
 
-            //call the passage service to log an new vehicle passage upon detecting plate number 
-            
-            
             if ($result['success']) {
                 $this->info("✓ Successfully fetched {$result['fetched']} detections");
                 $this->info("✓ Stored {$result['stored']} new detections");
@@ -72,7 +82,30 @@ class FetchCameraData extends Command
                     $this->error("✗ Failed to store {$result['errors']} detections");
                 }
                 
-                Log::info('Camera data fetch completed', $result);
+                // Process unprocessed detections into vehicle passages
+                $this->info('Processing detections into vehicle passages...');
+                $processResult = $this->cameraDetectionService->processUnprocessedDetections();
+                
+                if ($processResult['success']) {
+                    if ($processResult['processed'] > 0) {
+                        $this->info("✓ Processed {$processResult['processed']} detections into passages");
+                    }
+                    
+                    if ($processResult['errors'] > 0) {
+                        $this->warn("⚠ Failed to process {$processResult['errors']} detections");
+                    }
+                    
+                    if ($processResult['processed'] === 0 && $processResult['errors'] === 0) {
+                        $this->line("ℹ No unprocessed detections to process");
+                    }
+                } else {
+                    $this->error("✗ Failed to process detections: {$processResult['message']}");
+                }
+                
+                Log::info('Camera data fetch completed', array_merge($result, [
+                    'passages_processed' => $processResult['processed'] ?? 0,
+                    'passages_errors' => $processResult['errors'] ?? 0,
+                ]));
                 
                 return Command::SUCCESS;
             } else {
