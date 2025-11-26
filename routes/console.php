@@ -17,9 +17,9 @@ Schedule::command('passages:update-total-amounts')
     ->runInBackground();
 
 // Schedule camera detection log fetching
-// Run every 5 minutes to fetch new plate number detections
-Schedule::command('camera:fetch-logs')
-    ->everyFiveMinutes()
+// Run every 2 seconds to fetch new plate number detections from ZKTeco camera
+Schedule::command('fetch:camera-data')
+    ->everyTwoSeconds()
     ->timezone('Africa/Dar_es_Salaam')
     ->withoutOverlapping()
     ->runInBackground();
