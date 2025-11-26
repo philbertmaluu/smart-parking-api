@@ -56,6 +56,9 @@ class FetchCameraData extends Command
             
             // Fetch and store camera logs
             $result = $this->cameraDetectionService->fetchAndStoreLogs($dateTime);
+
+            //call the passage service to log an new vehicle passage upon detecting plate number 
+            
             
             if ($result['success']) {
                 $this->info("✓ Successfully fetched {$result['fetched']} detections");
