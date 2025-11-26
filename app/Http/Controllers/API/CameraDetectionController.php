@@ -23,7 +23,7 @@ class CameraDetectionController extends BaseController
     }
 
     /**
-     * Fetch camera logs from API (without storing)
+     * Fetch camera logs from database
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
@@ -31,27 +31,66 @@ class CameraDetectionController extends BaseController
     public function fetchLogs(Request $request)
     {
         try {
-            $dateTime = null;
-            
-            // Optional date parameter
-            if ($request->has('date')) {
-                try {
-                    $dateTime = Carbon::parse($request->input('date'));
-                } catch (\Exception $e) {
-                    return $this->sendError('Invalid date format. Use YYYY-MM-DD or YYYY-MM-DD HH:mm:ss', [], 400);
+            $perPage = $request->get('per_page', 100);
+            $plateNumber = $request->get('plate_number');
+            $startDate = $request->get('start_date');
+            $endDate = $request->get('end_date');
+            $processed = $request->get('processed');
+            $gateId = $request->get('gate_id');
+
+            $query = CameraDetectionLog::with('gate:id,name,station_id');
+
+            // Filter by gate - operators see only their gates
+            $user = auth()->user();
+            if ($user && $user->role_id === 3) { // Operator role
+                // Get operator's assigned gates
+                $operatorGates = \DB::table('operator_station')
+                    ->where('user_id', $user->id)
+                    ->pluck('gate_id')
+                    ->toArray();
+                
+                if (!empty($operatorGates)) {
+                    $query->whereIn('gate_id', $operatorGates);
+                } else {
+                    // Operator has no assigned gates
+                    $query->whereRaw('1 = 0'); // Return empty
+                }
+            } elseif ($gateId) {
+                // Admin can filter by specific gate
+                $query->byGate($gateId);
+            }
+
+            // Filter by plate number
+            if ($plateNumber) {
+                $query->byPlateNumber($plateNumber);
+            }
+
+            // Filter by date range
+            if ($startDate && $endDate) {
+                $query->byDateRange($startDate, $endDate);
+            }
+
+            // Filter by processed status
+            if ($processed !== null) {
+                if ($processed === 'true' || $processed === true) {
+                    $query->processed();
+                } elseif ($processed === 'false' || $processed === false) {
+                    $query->unprocessed();
                 }
             }
 
-            $result = $this->cameraDetectionService->fetchCameraLogs($dateTime);
+            // Get total count
+            $count = $query->count();
 
-            if ($result['success']) {
-                return $this->sendResponse([
-                    'detections' => $result['data'],
-                    'count' => $result['count']
-                ], 'Camera logs fetched successfully');
-            }
+            // Get detections ordered by most recent
+            $detections = $query->orderBy('detection_timestamp', 'desc')
+                ->limit($perPage)
+                ->get();
 
-            return $this->sendError($result['message'], [], 500);
+            return $this->sendResponse([
+                'detections' => $detections,
+                'count' => $count
+            ], 'Camera logs fetched successfully from database');
 
         } catch (\Exception $e) {
             return $this->sendError('Error fetching camera logs', ['error' => $e->getMessage()], 500);
