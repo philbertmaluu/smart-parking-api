@@ -81,9 +81,7 @@ return new class extends Migration
             
             $table->timestamps();
             
-            // Indexes for common queries
-            $table->index('numberplate');
-            $table->index('detection_timestamp');
+            // Indexes for common queries (numberplate already indexed above)
             $table->index(['processed', 'detection_timestamp']);
             $table->index('camera_detection_id');
         });
