@@ -11,6 +11,7 @@ class CameraDetectionLog extends Model
 
     protected $fillable = [
         'camera_detection_id',
+        'gate_id',
         'numberplate',
         'originalplate',
         'detection_timestamp',
@@ -136,6 +137,18 @@ class CameraDetectionLog extends Model
     }
 
     /**
+     * Scope a query to filter by gate.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param int $gateId
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeByGate($query, int $gateId)
+    {
+        return $query->where('gate_id', $gateId);
+    }
+
+    /**
      * Mark detection as processed.
      *
      * @param string|null $notes
@@ -148,6 +161,14 @@ class CameraDetectionLog extends Model
             'processed_at' => now(),
             'processing_notes' => $notes,
         ]);
+    }
+
+    /**
+     * Get the gate that owns this detection.
+     */
+    public function gate()
+    {
+        return $this->belongsTo(\App\Models\Gate::class);
     }
 }
 
