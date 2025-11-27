@@ -76,7 +76,7 @@ class VehiclePassageController extends BaseController
     public function show($id)
     {
         try {
-            $passage = $this->passageRepository->getPassageByIdWithRelations($id);
+            $passage = $this->passageRepository->getPassageByIdWithRelations((int) $id);
 
             if (!$passage) {
                 return $this->sendError('Vehicle passage not found', [], 404);
