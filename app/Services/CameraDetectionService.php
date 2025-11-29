@@ -9,6 +9,7 @@ use App\Models\CameraDetectionLog;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Exception;
 use Carbon\Carbon;
 
@@ -341,179 +342,244 @@ class CameraDetectionService
         $errors = 0;
 
         try {
-            // Get all unprocessed detections ordered by timestamp (oldest first)
-            // Exclude detections that are pending vehicle type (they need manual intervention)
-            $unprocessedDetections = $this->repository->getUnprocessedDetections()
-                ->filter(function($detection) {
-                    $status = $detection->processing_status;
-                    return $status !== 'pending_vehicle_type' && ($status === null || $status === 'pending');
-                });
+            // Use database transaction with locking to prevent race conditions
+            return DB::transaction(function () use (&$processed, &$errors) {
+                // Get all unprocessed detections ordered by timestamp (oldest first)
+                // Use lockForUpdate() to prevent concurrent processing of the same detections
+                // Exclude detections that are pending vehicle type (they need manual intervention)
+                $unprocessedDetections = CameraDetectionLog::where('processed', false)
+                    ->where(function($query) {
+                        $query->whereNull('processing_status')
+                              ->orWhere('processing_status', 'pending');
+                    })
+                    ->orderBy('detection_timestamp', 'asc')
+                    ->orderBy('id', 'asc')
+                    ->lockForUpdate() // Prevent concurrent processing
+                    ->get()
+                    ->filter(function($detection) {
+                        $status = $detection->processing_status;
+                        return $status !== 'pending_vehicle_type' && ($status === null || $status === 'pending');
+                    });
 
-            if ($unprocessedDetections->isEmpty()) {
-                return [
-                    'success' => true,
-                    'message' => 'No unprocessed detections found',
-                    'processed' => 0,
-                    'errors' => 0,
-                ];
-            }
-
-            // Get system operator ID for automated processes
-            $operatorId = $this->getSystemOperatorId();
-
-            foreach ($unprocessedDetections as $detection) {
-                try {
-                    // Skip if plate number is empty
-                    if (empty($detection->numberplate)) {
-                        $detection->markAsProcessed('Skipped: Empty plate number');
-                        $errors++;
-                        continue;
-                    }
-
-                    // Determine direction: 0 = entry, 1 = exit
-                    $direction = $detection->direction;
-                    $plateNumber = trim($detection->numberplate);
-                    $gateId = $detection->gate_id ?? $this->gateId;
-
-                    // Check if vehicle exists before processing
-                    $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
-                    
-                    if (!$vehicle) {
-                        // Vehicle doesn't exist - mark as pending vehicle type
-                        $detection->markAsPendingVehicleType('Vehicle not found - awaiting vehicle type selection');
-                        Log::info('Detection marked as pending vehicle type', [
-                            'detection_id' => $detection->id,
-                            'plate_number' => $plateNumber,
-                        ]);
-                        continue; // Skip processing, wait for manual intervention
-                    }
-
-                    // Check if vehicle has active passage (is parked)
-                    $lookupResult = $this->passageService->quickPlateLookup($plateNumber);
-                    $hasActivePassage = $lookupResult['success'] && 
-                                       isset($lookupResult['data']['active_passage']) && 
-                                       $lookupResult['data']['active_passage'];
-
-                    // Get gate to check gate type
-                    $gate = \App\Models\Gate::find($gateId);
-                    $gateSupportsExit = $gate && ($gate->gate_type === 'exit' || $gate->gate_type === 'both');
-
-                    // If vehicle has active passage and gate supports exit, mark as pending_exit
-                    // This requires operator confirmation before processing exit
-                    if ($hasActivePassage && $gateSupportsExit) {
-                        $detection->markAsPendingExit('Vehicle has active passage - awaiting exit confirmation');
-                        Log::info('Detection marked as pending exit', [
-                            'detection_id' => $detection->id,
-                            'plate_number' => $plateNumber,
-                            'gate_id' => $gateId,
-                        ]);
-                        continue; // Skip auto-processing, wait for operator confirmation
-                    }
-
-                    // Prepare additional data from detection
-                    $additionalData = [
-                        'make' => $detection->make_str,
-                        'model' => $detection->model_str,
-                        'color' => $detection->color_str,
-                        'notes' => 'Automated camera detection',
-                        'detection_timestamp' => $detection->detection_timestamp,
-                        'camera_detection_log_id' => $detection->id,
+                if ($unprocessedDetections->isEmpty()) {
+                    return [
+                        'success' => true,
+                        'message' => 'No unprocessed detections found',
+                        'processed' => 0,
+                        'errors' => 0,
                     ];
+                }
 
-                    $result = null;
+                // Get system operator ID for automated processes
+                $operatorId = $this->getSystemOperatorId();
 
-                    // Process based on direction
-                    if ($direction === 0 || $direction === null) {
-                        // Entry detection
-                        $result = $this->passageService->processVehicleEntry(
-                            $plateNumber,
-                            $gateId,
-                            $operatorId,
-                            $additionalData
-                        );
-                    } elseif ($direction === 1) {
-                        // Exit detection - but if we got here, vehicle doesn't have active passage
-                        // So this is an invalid exit, process as entry instead
-                        if (!$hasActivePassage) {
-                            $result = $this->passageService->processVehicleEntry(
-                                $plateNumber,
-                                $gateId,
-                                $operatorId,
-                                $additionalData
-                            );
-                        } else {
-                            // Should have been caught above, but just in case
-                            $detection->markAsPendingExit('Exit detection for parked vehicle - awaiting confirmation');
+                foreach ($unprocessedDetections as $detection) {
+                    try {
+                        // Refresh detection from database to ensure we have latest status
+                        $detection->refresh();
+                        
+                        // Double-check status hasn't changed (race condition protection)
+                        if ($detection->processed || 
+                            ($detection->processing_status !== null && 
+                             $detection->processing_status !== 'pending')) {
+                            continue; // Already processed or status changed
+                        }
+                        
+                        // Skip if plate number is empty
+                        if (empty($detection->numberplate) || trim($detection->numberplate) === '') {
+                            $detection->markAsProcessed('Skipped: Empty plate number');
+                            $errors++;
                             continue;
                         }
-                    } else {
-                        // Unknown direction - determine from active passage
+
+                        // Determine direction: 0 = entry, 1 = exit
+                        $direction = $detection->direction;
+                        $plateNumber = trim($detection->numberplate);
+                        $gateId = $detection->gate_id ?? $this->gateId;
+                        
+                        // Validate gate ID exists
+                        if (!$gateId) {
+                            $detection->markAsFailed('Invalid gate ID');
+                            $errors++;
+                            Log::warning('Detection has invalid gate ID', [
+                                'detection_id' => $detection->id,
+                                'plate_number' => $plateNumber,
+                            ]);
+                            continue;
+                        }
+
+                        // Check if vehicle exists before processing
+                        $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
+                        
+                        if (!$vehicle) {
+                            // Vehicle doesn't exist - mark as pending vehicle type
+                            // Use update() directly to avoid race conditions
+                            $detection->update([
+                                'processing_status' => 'pending_vehicle_type',
+                                'processing_notes' => 'Vehicle not found - awaiting vehicle type selection',
+                            ]);
+                            Log::info('Detection marked as pending vehicle type', [
+                                'detection_id' => $detection->id,
+                                'plate_number' => $plateNumber,
+                            ]);
+                            continue; // Skip processing, wait for manual intervention
+                        }
+
+                        // Check if vehicle has active passage (is parked)
+                        $lookupResult = $this->passageService->quickPlateLookup($plateNumber);
+                        $hasActivePassage = $lookupResult['success'] && 
+                                           isset($lookupResult['data']['active_passage']) && 
+                                           $lookupResult['data']['active_passage'];
+
+                        // Get gate to check gate type
+                        $gate = \App\Models\Gate::find($gateId);
+                        if (!$gate) {
+                            $detection->markAsFailed('Gate not found');
+                            $errors++;
+                            Log::warning('Gate not found for detection', [
+                                'detection_id' => $detection->id,
+                                'gate_id' => $gateId,
+                                'plate_number' => $plateNumber,
+                            ]);
+                            continue;
+                        }
+                        
+                        $gateSupportsExit = $gate->gate_type === 'exit' || $gate->gate_type === 'both';
+
+                        // If vehicle has active passage and gate supports exit, mark as pending_exit
+                        // This requires operator confirmation before processing exit
                         if ($hasActivePassage && $gateSupportsExit) {
-                            // Should have been caught above, but mark as pending_exit
-                            $detection->markAsPendingExit('Vehicle has active passage - awaiting exit confirmation');
-                            continue;
-                        } else {
-                            // No active passage, treat as entry
+                            // Use update() directly to avoid race conditions
+                            $detection->update([
+                                'processing_status' => 'pending_exit',
+                                'processing_notes' => 'Vehicle has active passage - awaiting exit confirmation',
+                            ]);
+                            Log::info('Detection marked as pending exit', [
+                                'detection_id' => $detection->id,
+                                'plate_number' => $plateNumber,
+                                'gate_id' => $gateId,
+                            ]);
+                            continue; // Skip auto-processing, wait for operator confirmation
+                        }
+
+                        // Prepare additional data from detection
+                        $additionalData = [
+                            'make' => $detection->make_str,
+                            'model' => $detection->model_str,
+                            'color' => $detection->color_str,
+                            'notes' => 'Automated camera detection',
+                            'detection_timestamp' => $detection->detection_timestamp,
+                            'camera_detection_log_id' => $detection->id,
+                        ];
+
+                        $result = null;
+
+                        // Process based on direction
+                        if ($direction === 0 || $direction === null) {
+                            // Entry detection
                             $result = $this->passageService->processVehicleEntry(
                                 $plateNumber,
                                 $gateId,
                                 $operatorId,
                                 $additionalData
                             );
-                        }
-                    }
-
-                    // Mark as processed if successful
-                    if ($result && isset($result['success']) && $result['success']) {
-                        // Extract passage ID safely
-                        $passageId = 'N/A';
-                        if (isset($result['data'])) {
-                            if (is_object($result['data']) && isset($result['data']->id)) {
-                                $passageId = $result['data']->id;
-                            } elseif (is_array($result['data']) && isset($result['data']['id'])) {
-                                $passageId = $result['data']['id'];
+                        } elseif ($direction === 1) {
+                            // Exit detection - but if we got here, vehicle doesn't have active passage
+                            // So this is an invalid exit, process as entry instead
+                            if (!$hasActivePassage) {
+                                $result = $this->passageService->processVehicleEntry(
+                                    $plateNumber,
+                                    $gateId,
+                                    $operatorId,
+                                    $additionalData
+                                );
+                            } else {
+                                // Should have been caught above, but just in case
+                                $detection->update([
+                                    'processing_status' => 'pending_exit',
+                                    'processing_notes' => 'Exit detection for parked vehicle - awaiting confirmation',
+                                ]);
+                                continue;
+                            }
+                        } else {
+                            // Unknown direction - determine from active passage
+                            if ($hasActivePassage && $gateSupportsExit) {
+                                // Should have been caught above, but mark as pending_exit
+                                $detection->update([
+                                    'processing_status' => 'pending_exit',
+                                    'processing_notes' => 'Vehicle has active passage - awaiting exit confirmation',
+                                ]);
+                                continue;
+                            } else {
+                                // No active passage, treat as entry
+                                $result = $this->passageService->processVehicleEntry(
+                                    $plateNumber,
+                                    $gateId,
+                                    $operatorId,
+                                    $additionalData
+                                );
                             }
                         }
-                        
-                        $directionLabel = ($direction === 1) ? 'exit' : 'entry';
-                        $detection->markAsProcessed(
-                            "Processed as {$directionLabel}. Passage ID: {$passageId}"
-                        );
-                        $processed++;
-                    } else {
-                        // Mark as processed with error note
-                        $errorMessage = isset($result['message']) ? $result['message'] : 'Unknown error';
-                        $detection->markAsProcessed("Failed to process: {$errorMessage}");
+
+                        // Mark as processed if successful
+                        if ($result && isset($result['success']) && $result['success']) {
+                            // Extract passage ID safely
+                            $passageId = 'N/A';
+                            if (isset($result['data'])) {
+                                if (is_object($result['data']) && isset($result['data']->id)) {
+                                    $passageId = $result['data']->id;
+                                } elseif (is_array($result['data']) && isset($result['data']['id'])) {
+                                    $passageId = $result['data']['id'];
+                                }
+                            }
+                            
+                            $directionLabel = ($direction === 1) ? 'exit' : 'entry';
+                            $detection->markAsProcessed(
+                                "Processed as {$directionLabel}. Passage ID: {$passageId}"
+                            );
+                            $processed++;
+                        } else {
+                            // Mark as processed with error note
+                            $errorMessage = isset($result['message']) ? $result['message'] : 'Unknown error';
+                            $detection->markAsProcessed("Failed to process: {$errorMessage}");
+                            $errors++;
+                            
+                            Log::warning('Failed to process camera detection into passage', [
+                                'detection_id' => $detection->id,
+                                'plate_number' => $plateNumber,
+                                'direction' => $direction,
+                                'error' => $errorMessage,
+                                'result' => $result,
+                            ]);
+                        }
+
+                    } catch (Exception $e) {
                         $errors++;
+                        // Use update() directly to avoid race conditions
+                        $detection->update([
+                            'processed' => true,
+                            'processing_status' => 'failed',
+                            'processed_at' => now(),
+                            'processing_notes' => "Exception: " . $e->getMessage(),
+                        ]);
                         
-                        Log::warning('Failed to process camera detection into passage', [
+                        Log::error('Exception processing camera detection', [
                             'detection_id' => $detection->id,
-                            'plate_number' => $plateNumber,
-                            'direction' => $direction,
-                            'error' => $errorMessage,
+                            'plate_number' => $detection->numberplate ?? 'unknown',
+                            'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
                         ]);
                     }
-
-                } catch (Exception $e) {
-                    $errors++;
-                    $detection->markAsProcessed("Exception: " . $e->getMessage());
-                    
-                    Log::error('Exception processing camera detection', [
-                        'detection_id' => $detection->id,
-                        'plate_number' => $detection->numberplate ?? 'unknown',
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                    ]);
                 }
-            }
 
-            return [
-                'success' => true,
-                'message' => 'Processed camera detections',
-                'processed' => $processed,
-                'errors' => $errors,
-                'total' => $unprocessedDetections->count(),
-            ];
+                return [
+                    'success' => true,
+                    'message' => 'Processed camera detections',
+                    'processed' => $processed,
+                    'errors' => $errors,
+                    'total' => $unprocessedDetections->count(),
+                ];
+            }, 5); // 5 second timeout for transaction
 
         } catch (Exception $e) {
             Log::error('Error processing unprocessed detections', [
