@@ -4,22 +4,32 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\BaseController;
 use App\Services\CameraDetectionService;
+use App\Services\VehiclePassageService;
 use App\Repositories\CameraDetectionLogRepository;
+use App\Repositories\VehicleRepository;
 use App\Models\CameraDetectionLog;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class CameraDetectionController extends BaseController
 {
     protected $cameraDetectionService;
     protected $repository;
+    protected $vehiclePassageService;
+    protected $vehicleRepository;
 
     public function __construct(
         CameraDetectionService $cameraDetectionService,
-        CameraDetectionLogRepository $repository
+        CameraDetectionLogRepository $repository,
+        VehiclePassageService $vehiclePassageService,
+        VehicleRepository $vehicleRepository
     ) {
         $this->cameraDetectionService = $cameraDetectionService;
         $this->repository = $repository;
+        $this->vehiclePassageService = $vehiclePassageService;
+        $this->vehicleRepository = $vehicleRepository;
     }
 
     /**
@@ -44,7 +54,7 @@ class CameraDetectionController extends BaseController
             $user = auth()->user();
             if ($user && $user->role_id === 3) { // Operator role
                 // Get operator's assigned gates
-                $operatorGates = \DB::table('operator_station')
+                $operatorGates = DB::table('operator_station')
                     ->where('user_id', $user->id)
                     ->pluck('gate_id')
                     ->toArray();
@@ -299,6 +309,264 @@ class CameraDetectionController extends BaseController
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving configuration', ['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Get detections pending vehicle type selection
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getPendingVehicleTypeDetections(Request $request)
+    {
+        try {
+            $detections = $this->repository->getPendingVehicleTypeDetections();
+
+            // Filter by gate if operator
+            $user = auth()->user();
+            if ($user && $user->role_id === 3) { // Operator role
+                // Get operator's assigned stations
+                $assignedStations = DB::table('operator_station')
+                    ->where('user_id', $user->id)
+                    ->where('is_active', true)
+                    ->pluck('station_id')
+                    ->toArray();
+                
+                if (!empty($assignedStations)) {
+                    // Get all gates for the operator's assigned stations
+                    $operatorGates = \App\Models\Gate::whereIn('station_id', $assignedStations)
+                        ->where('is_active', true)
+                        ->pluck('id')
+                        ->toArray();
+                    
+                    if (!empty($operatorGates)) {
+                        $detections = $detections->whereIn('gate_id', $operatorGates);
+                    } else {
+                        // No gates found for operator's stations
+                        $detections = collect([]);
+                    }
+                } else {
+                    // Operator has no assigned stations
+                    $detections = collect([]);
+                }
+            }
+
+            return $this->sendResponse($detections->values(), 'Pending vehicle type detections retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->sendError('Error retrieving pending detections', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Process detection with vehicle type
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function processWithVehicleType(Request $request, int $id)
+    {
+        try {
+            $request->validate([
+                'body_type_id' => 'required|integer|exists:vehicle_body_types,id',
+            ]);
+
+            $detection = $this->repository->findById($id);
+
+            if (!$detection) {
+                return $this->sendError('Detection not found', [], 404);
+            }
+
+            // Allow processing if status is pending_vehicle_type OR if vehicle already exists (reprocess)
+            $plateNumber = trim($detection->numberplate);
+            if (empty($plateNumber)) {
+                return $this->sendError('Plate number is empty', [], 400);
+            }
+
+            // Check if vehicle already exists
+            $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
+            
+            if (!$vehicle) {
+                // Check status before creating vehicle
+                if ($detection->processing_status !== 'pending_vehicle_type') {
+                    return $this->sendError('Detection is not pending vehicle type selection', [], 400);
+                }
+
+                // Create vehicle with provided body type
+                $vehicleData = [
+                    'plate_number' => $plateNumber,
+                    'body_type_id' => $request->input('body_type_id'),
+                    'make' => $detection->make_str,
+                    'model' => $detection->model_str,
+                    'color' => $detection->color_str,
+                    'is_registered' => false,
+                ];
+
+                $vehicle = $this->vehicleRepository->createVehicle($vehicleData);
+                Log::info('Vehicle created from pending detection', [
+                    'detection_id' => $detection->id,
+                    'vehicle_id' => $vehicle->id,
+                    'plate_number' => $plateNumber,
+                ]);
+            } else {
+                // Vehicle already exists - update status if needed and proceed with processing
+                Log::info('Vehicle already exists, processing detection', [
+                    'detection_id' => $detection->id,
+                    'vehicle_id' => $vehicle->id,
+                    'plate_number' => $plateNumber,
+                    'current_status' => $detection->processing_status,
+                ]);
+            }
+
+            // Get operator ID
+            $operatorId = auth()->id() ?? $this->getSystemOperatorId();
+            $gateId = $detection->gate_id;
+
+            // Prepare additional data
+            // Get default payment method (Cash) for camera detections
+            $defaultPaymentType = \App\Models\PaymentType::where('name', 'Cash')->first();
+            if (!$defaultPaymentType) {
+                // Create default payment type if it doesn't exist
+                $defaultPaymentType = \App\Models\PaymentType::create([
+                    'name' => 'Cash',
+                    'description' => 'Cash payment',
+                    'is_active' => true
+                ]);
+            }
+
+            $additionalData = [
+                'make' => $detection->make_str,
+                'model' => $detection->model_str,
+                'color' => $detection->color_str,
+                'notes' => 'Processed from camera detection with vehicle type selection',
+                'detection_timestamp' => $detection->detection_timestamp,
+                'camera_detection_log_id' => $detection->id,
+                'payment_method' => 'cash', // Default payment method for camera detections
+            ];
+
+            // Process based on direction
+            $direction = $detection->direction;
+            $result = null;
+
+            if ($direction === 0 || $direction === null) {
+                // Entry detection
+                $result = $this->vehiclePassageService->processVehicleEntry(
+                    $plateNumber,
+                    $gateId,
+                    $operatorId,
+                    $additionalData
+                );
+            } elseif ($direction === 1) {
+                // Exit detection
+                $result = $this->vehiclePassageService->processVehicleExit(
+                    $plateNumber,
+                    $gateId,
+                    $operatorId,
+                    $additionalData
+                );
+            } else {
+                // Unknown direction - determine from active passage
+                $lookupResult = $this->vehiclePassageService->quickPlateLookup($plateNumber);
+                
+                if ($lookupResult['success'] && isset($lookupResult['data']['active_passage']) && $lookupResult['data']['active_passage']) {
+                    // Has active passage, treat as exit
+                    $result = $this->vehiclePassageService->processVehicleExit(
+                        $plateNumber,
+                        $gateId,
+                        $operatorId,
+                        $additionalData
+                    );
+                } else {
+                    // No active passage, treat as entry
+                    $result = $this->vehiclePassageService->processVehicleEntry(
+                        $plateNumber,
+                        $gateId,
+                        $operatorId,
+                        $additionalData
+                    );
+                }
+            }
+
+            // Mark detection as processed
+            if ($result && isset($result['success']) && $result['success']) {
+                $passageId = 'N/A';
+                if (isset($result['data'])) {
+                    if (is_object($result['data']) && isset($result['data']->id)) {
+                        $passageId = $result['data']->id;
+                    } elseif (is_array($result['data']) && isset($result['data']['id'])) {
+                        $passageId = $result['data']['id'];
+                    }
+                }
+                
+                $directionLabel = ($direction === 1) ? 'exit' : 'entry';
+                $detection->markAsProcessed(
+                    "Processed as {$directionLabel} with vehicle type selection. Passage ID: {$passageId}"
+                );
+
+                return $this->sendResponse([
+                    'detection' => $detection,
+                    'vehicle' => $vehicle,
+                    'passage' => $result['data'] ?? null,
+                ], 'Detection processed successfully with vehicle type');
+            } else {
+                $errorMessage = isset($result['message']) ? $result['message'] : 'Unknown error';
+                $detection->markAsFailed("Failed to process: {$errorMessage}");
+                
+                return $this->sendError('Failed to process detection', [
+                    'error' => $errorMessage,
+                    'result' => $result,
+                ], 500);
+            }
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->sendError('Validation error', $e->errors(), 422);
+        } catch (\Exception $e) {
+            Log::error('Error processing detection with vehicle type', [
+                'detection_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->sendError('Error processing detection', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get system operator ID for automated processes
+     *
+     * @return int
+     */
+    private function getSystemOperatorId(): int
+    {
+        // Check for configured operator ID in environment
+        $operatorId = env('CAMERA_OPERATOR_ID');
+        if ($operatorId && is_numeric($operatorId)) {
+            $user = \App\Models\User::find($operatorId);
+            if ($user && $user->is_active) {
+                return (int) $operatorId;
+            }
+        }
+
+        // Try to get first active admin user
+        $adminUser = \App\Models\User::active()
+            ->whereHas('role', function ($query) {
+                $query->where('name', 'System Admin');
+            })
+            ->first();
+
+        if ($adminUser) {
+            return $adminUser->id;
+        }
+
+        // Fallback: get first active user
+        $activeUser = \App\Models\User::active()->first();
+        if ($activeUser) {
+            return $activeUser->id;
+        }
+
+        // Last resort: return 1 (should exist as system user)
+        return 1;
     }
 }
 
