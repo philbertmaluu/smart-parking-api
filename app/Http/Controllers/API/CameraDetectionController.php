@@ -213,20 +213,39 @@ class CameraDetectionController extends BaseController
                 }
             }
 
+            // Ensure passage service is set for auto-processing
+            $this->cameraDetectionService->setPassageService($this->vehiclePassageService);
+
             $result = $this->cameraDetectionService->fetchAndStoreLogs($dateTime);
 
             if ($result['success']) {
+                // Auto-process unprocessed detections after storing
+                // This ensures new detections are immediately converted to pending_vehicle_type or pending_exit status
+                $processResult = $this->cameraDetectionService->processUnprocessedDetections();
+                
+                Log::info('Auto-processed detections after fetch-and-store', [
+                    'stored' => $result['stored'],
+                    'processed' => $processResult['processed'] ?? 0,
+                    'errors' => $processResult['errors'] ?? 0,
+                ]);
+
                 return $this->sendResponse([
                     'fetched' => $result['fetched'],
                     'stored' => $result['stored'],
                     'skipped' => $result['skipped'],
-                    'errors' => $result['errors']
-                ], 'Camera logs fetched and stored successfully');
+                    'errors' => $result['errors'],
+                    'processed' => $processResult['processed'] ?? 0,
+                    'processing_errors' => $processResult['errors'] ?? 0,
+                ], 'Camera logs fetched, stored, and processed successfully');
             }
 
             return $this->sendError($result['message'], [], 500);
 
         } catch (\Exception $e) {
+            Log::error('Error in fetchAndStoreLogs', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return $this->sendError('Error fetching and storing camera logs', ['error' => $e->getMessage()], 500);
         }
     }
@@ -412,7 +431,20 @@ class CameraDetectionController extends BaseController
                 }
             }
 
-            return $this->sendResponse($detections->values(), 'Pending vehicle type detections retrieved successfully');
+            $count = $detections->count();
+            $detectionsArray = $detections->values()->toArray();
+            
+            // Log queue status for debugging
+            Log::info('Pending vehicle type detections retrieved', [
+                'count' => $count,
+                'user_id' => $user?->id,
+                'user_role' => $user?->role_id,
+                'oldest_detection_id' => $count > 0 ? $detectionsArray[0]['id'] ?? null : null,
+                'oldest_detection_plate' => $count > 0 ? $detectionsArray[0]['numberplate'] ?? null : null,
+                'oldest_detection_timestamp' => $count > 0 ? $detectionsArray[0]['detection_timestamp'] ?? null : null,
+            ]);
+
+            return $this->sendResponse($detectionsArray, 'Pending vehicle type detections retrieved successfully');
 
         } catch (\Exception $e) {
             return $this->sendError('Error retrieving pending detections', ['error' => $e->getMessage()], 500);
@@ -495,7 +527,20 @@ class CameraDetectionController extends BaseController
                 ];
             })->filter()->values();
 
-            return $this->sendResponse($detectionsWithPassage, 'Pending exit detections retrieved successfully');
+            $count = $detectionsWithPassage->count();
+            $detectionsArray = $detectionsWithPassage->toArray();
+            
+            // Log queue status for debugging
+            Log::info('Pending exit detections retrieved', [
+                'count' => $count,
+                'user_id' => $user?->id,
+                'user_role' => $user?->role_id,
+                'oldest_detection_id' => $count > 0 ? $detectionsArray[0]['id'] ?? null : null,
+                'oldest_detection_plate' => $count > 0 ? $detectionsArray[0]['numberplate'] ?? null : null,
+                'oldest_detection_timestamp' => $count > 0 ? $detectionsArray[0]['detection_timestamp'] ?? null : null,
+            ]);
+
+            return $this->sendResponse($detectionsArray, 'Pending exit detections retrieved successfully');
 
         } catch (\Exception $e) {
             Log::error('Error retrieving pending exit detections', [
@@ -767,6 +812,83 @@ class CameraDetectionController extends BaseController
             ]);
 
             return $this->sendError('Error processing exit detection', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get queue status - pending detection counts
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getQueueStatus(Request $request)
+    {
+        try {
+            // Get unprocessed detections (stuck in pending status)
+            $unprocessedCount = CameraDetectionLog::where('processed', false)
+                ->where(function($query) {
+                    $query->whereNull('processing_status')
+                          ->orWhere('processing_status', 'pending');
+                })
+                ->count();
+            
+            // Get pending vehicle type detections
+            $pendingVehicleTypeCount = $this->repository->getPendingVehicleTypeDetections()->count();
+            
+            // Get pending exit detections
+            $pendingExitCount = $this->repository->getPendingExitDetections()->count();
+            
+            // Get total detections
+            $totalDetections = CameraDetectionLog::count();
+            
+            // Get processed detections
+            $processedCount = CameraDetectionLog::where('processed', true)->count();
+            
+            // Get oldest unprocessed detection
+            $oldestUnprocessed = CameraDetectionLog::where('processed', false)
+                ->where(function($query) {
+                    $query->whereNull('processing_status')
+                          ->orWhere('processing_status', 'pending');
+                })
+                ->orderBy('detection_timestamp', 'asc')
+                ->orderBy('id', 'asc')
+                ->first();
+            
+            // Get oldest pending vehicle type detection
+            $oldestPendingVehicleType = $this->repository->getPendingVehicleTypeDetections()->first();
+            
+            // Get oldest pending exit detection
+            $oldestPendingExit = $this->repository->getPendingExitDetections()->first();
+            
+            return $this->sendResponse([
+                'unprocessed' => $unprocessedCount,
+                'pending_vehicle_type' => $pendingVehicleTypeCount,
+                'pending_exit' => $pendingExitCount,
+                'total' => $totalDetections,
+                'processed' => $processedCount,
+                'oldest_unprocessed' => $oldestUnprocessed ? [
+                    'id' => $oldestUnprocessed->id,
+                    'plate_number' => $oldestUnprocessed->numberplate,
+                    'detection_timestamp' => $oldestUnprocessed->detection_timestamp,
+                ] : null,
+                'oldest_pending_vehicle_type' => $oldestPendingVehicleType ? [
+                    'id' => $oldestPendingVehicleType->id,
+                    'plate_number' => $oldestPendingVehicleType->numberplate,
+                    'detection_timestamp' => $oldestPendingVehicleType->detection_timestamp,
+                ] : null,
+                'oldest_pending_exit' => $oldestPendingExit ? [
+                    'id' => $oldestPendingExit->id,
+                    'plate_number' => $oldestPendingExit->numberplate,
+                    'detection_timestamp' => $oldestPendingExit->detection_timestamp,
+                ] : null,
+            ], 'Queue status retrieved successfully');
+            
+        } catch (\Exception $e) {
+            Log::error('Error retrieving queue status', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->sendError('Error retrieving queue status', ['error' => $e->getMessage()], 500);
         }
     }
 
