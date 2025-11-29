@@ -251,11 +251,14 @@ Route::prefix('toll-v1')->group(function () {
             Route::post('/store', [CameraDetectionController::class, 'storeLogs']);
             Route::post('/fetch-and-store', [CameraDetectionController::class, 'fetchAndStoreLogs']);
             Route::get('/logs', [CameraDetectionController::class, 'getStoredLogs']);
+            Route::get('/logs/latest', [CameraDetectionController::class, 'getLatestDetectionInfo']);
             Route::get('/logs/unprocessed', [CameraDetectionController::class, 'getUnprocessedLogs']);
             Route::get('/logs/pending-vehicle-type', [CameraDetectionController::class, 'getPendingVehicleTypeDetections']);
+            Route::get('/logs/pending-exit', [CameraDetectionController::class, 'getPendingExitDetections']);
             Route::get('/logs/plate/{plateNumber}', [CameraDetectionController::class, 'getLogsByPlateNumber']);
             Route::put('/logs/{id}/mark-processed', [CameraDetectionController::class, 'markAsProcessed']);
             Route::post('/logs/{id}/process-with-vehicle-type', [CameraDetectionController::class, 'processWithVehicleType']);
+            Route::post('/logs/{id}/process-exit', [CameraDetectionController::class, 'processExitDetection']);
             Route::get('/config', [CameraDetectionController::class, 'getConfig']);
         });
 
