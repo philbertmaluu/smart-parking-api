@@ -34,6 +34,16 @@ class CameraDetectionLogRepository extends BaseRepository
     }
 
     /**
+     * Get detections pending vehicle type selection.
+     *
+     * @return Collection
+     */
+    public function getPendingVehicleTypeDetections(): Collection
+    {
+        return $this->model->pendingVehicleType()->orderBy('detection_timestamp', 'desc')->get();
+    }
+
+    /**
      * Get detections by plate number.
      *
      * @param string $plateNumber
