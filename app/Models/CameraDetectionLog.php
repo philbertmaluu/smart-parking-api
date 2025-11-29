@@ -54,6 +54,7 @@ class CameraDetectionLog extends Model
         'processed',
         'processed_at',
         'processing_notes',
+        'processing_status',
     ];
 
     protected $casts = [
@@ -112,6 +113,29 @@ class CameraDetectionLog extends Model
     }
 
     /**
+     * Scope a query to only include detections pending vehicle type.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopePendingVehicleType($query)
+    {
+        return $query->where('processing_status', 'pending_vehicle_type');
+    }
+
+    /**
+     * Scope a query to filter by processing status.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $status
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeByProcessingStatus($query, string $status)
+    {
+        return $query->where('processing_status', $status);
+    }
+
+    /**
      * Scope a query to filter by plate number.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query
@@ -158,6 +182,37 @@ class CameraDetectionLog extends Model
     {
         return $this->update([
             'processed' => true,
+            'processing_status' => 'processed',
+            'processed_at' => now(),
+            'processing_notes' => $notes,
+        ]);
+    }
+
+    /**
+     * Mark detection as pending vehicle type.
+     *
+     * @param string|null $notes
+     * @return bool
+     */
+    public function markAsPendingVehicleType(?string $notes = null): bool
+    {
+        return $this->update([
+            'processing_status' => 'pending_vehicle_type',
+            'processing_notes' => $notes,
+        ]);
+    }
+
+    /**
+     * Mark detection as failed.
+     *
+     * @param string|null $notes
+     * @return bool
+     */
+    public function markAsFailed(?string $notes = null): bool
+    {
+        return $this->update([
+            'processed' => true,
+            'processing_status' => 'failed',
             'processed_at' => now(),
             'processing_notes' => $notes,
         ]);
