@@ -260,6 +260,7 @@ Route::prefix('toll-v1')->group(function () {
             Route::post('/logs/{id}/process-with-vehicle-type', [CameraDetectionController::class, 'processWithVehicleType']);
             Route::post('/logs/{id}/process-exit', [CameraDetectionController::class, 'processExitDetection']);
             Route::get('/config', [CameraDetectionController::class, 'getConfig']);
+            Route::get('/queue-status', [CameraDetectionController::class, 'getQueueStatus']);
         });
 
         // Toll Service routes (Simplified toll system)
