@@ -388,6 +388,28 @@ class CameraDetectionService
                         continue; // Skip processing, wait for manual intervention
                     }
 
+                    // Check if vehicle has active passage (is parked)
+                    $lookupResult = $this->passageService->quickPlateLookup($plateNumber);
+                    $hasActivePassage = $lookupResult['success'] && 
+                                       isset($lookupResult['data']['active_passage']) && 
+                                       $lookupResult['data']['active_passage'];
+
+                    // Get gate to check gate type
+                    $gate = \App\Models\Gate::find($gateId);
+                    $gateSupportsExit = $gate && ($gate->gate_type === 'exit' || $gate->gate_type === 'both');
+
+                    // If vehicle has active passage and gate supports exit, mark as pending_exit
+                    // This requires operator confirmation before processing exit
+                    if ($hasActivePassage && $gateSupportsExit) {
+                        $detection->markAsPendingExit('Vehicle has active passage - awaiting exit confirmation');
+                        Log::info('Detection marked as pending exit', [
+                            'detection_id' => $detection->id,
+                            'plate_number' => $plateNumber,
+                            'gate_id' => $gateId,
+                        ]);
+                        continue; // Skip auto-processing, wait for operator confirmation
+                    }
+
                     // Prepare additional data from detection
                     $additionalData = [
                         'make' => $detection->make_str,
@@ -410,26 +432,26 @@ class CameraDetectionService
                             $additionalData
                         );
                     } elseif ($direction === 1) {
-                        // Exit detection
-                        $result = $this->passageService->processVehicleExit(
-                            $plateNumber,
-                            $gateId,
-                            $operatorId,
-                            $additionalData
-                        );
-                    } else {
-                        // Unknown direction - try to determine from active passage
-                        // If vehicle has active passage, treat as exit, otherwise entry
-                        $result = $this->passageService->quickPlateLookup($plateNumber);
-                        
-                        if ($result['success'] && isset($result['data']['active_passage']) && $result['data']['active_passage']) {
-                            // Has active passage, treat as exit
-                            $result = $this->passageService->processVehicleExit(
+                        // Exit detection - but if we got here, vehicle doesn't have active passage
+                        // So this is an invalid exit, process as entry instead
+                        if (!$hasActivePassage) {
+                            $result = $this->passageService->processVehicleEntry(
                                 $plateNumber,
                                 $gateId,
                                 $operatorId,
                                 $additionalData
                             );
+                        } else {
+                            // Should have been caught above, but just in case
+                            $detection->markAsPendingExit('Exit detection for parked vehicle - awaiting confirmation');
+                            continue;
+                        }
+                    } else {
+                        // Unknown direction - determine from active passage
+                        if ($hasActivePassage && $gateSupportsExit) {
+                            // Should have been caught above, but mark as pending_exit
+                            $detection->markAsPendingExit('Vehicle has active passage - awaiting exit confirmation');
+                            continue;
                         } else {
                             // No active passage, treat as entry
                             $result = $this->passageService->processVehicleEntry(
