@@ -108,6 +108,67 @@ class CameraDetectionController extends BaseController
     }
 
     /**
+     * Get latest detection info (lightweight check for polling)
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getLatestDetectionInfo(Request $request)
+    {
+        try {
+            $gateId = $request->get('gate_id');
+
+            $query = CameraDetectionLog::query();
+
+            // Filter by gate - operators see only their gates
+            $user = auth()->user();
+            if ($user && $user->role_id === 3) { // Operator role
+                // Get operator's assigned gates
+                $operatorGates = DB::table('operator_station')
+                    ->where('user_id', $user->id)
+                    ->pluck('gate_id')
+                    ->toArray();
+                
+                if (!empty($operatorGates)) {
+                    $query->whereIn('gate_id', $operatorGates);
+                } else {
+                    // Operator has no assigned gates
+                    return $this->sendResponse([
+                        'latest_id' => 0,
+                        'total_count' => 0,
+                        'latest_timestamp' => null,
+                    ], 'Latest detection info retrieved successfully');
+                }
+            } elseif ($gateId) {
+                // Admin can filter by specific gate
+                $query->byGate($gateId);
+            }
+
+            // Get total count
+            $count = $query->count();
+
+            // Get latest detection (only ID and timestamp)
+            $latestDetection = $query->orderBy('detection_timestamp', 'desc')
+                ->orderBy('id', 'desc')
+                ->select('id', 'detection_timestamp')
+                ->first();
+
+            return $this->sendResponse([
+                'latest_id' => $latestDetection ? $latestDetection->id : 0,
+                'total_count' => $count,
+                'latest_timestamp' => $latestDetection ? $latestDetection->detection_timestamp : null,
+            ], 'Latest detection info retrieved successfully');
+
+        } catch (\Exception $e) {
+            Log::error('Error retrieving latest detection info', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return $this->sendError('Error retrieving latest detection info', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Store camera logs in database
      *
      * @param Request $request
@@ -359,6 +420,93 @@ class CameraDetectionController extends BaseController
     }
 
     /**
+     * Get detections pending exit confirmation
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getPendingExitDetections(Request $request)
+    {
+        try {
+            $detections = $this->repository->getPendingExitDetections();
+
+            // Filter by gate if operator
+            $user = auth()->user();
+            if ($user && $user->role_id === 3) { // Operator role
+                // Get operator's assigned stations
+                $assignedStations = DB::table('operator_station')
+                    ->where('user_id', $user->id)
+                    ->where('is_active', true)
+                    ->pluck('station_id')
+                    ->toArray();
+                
+                if (!empty($assignedStations)) {
+                    // Get all gates for the operator's assigned stations
+                    $operatorGates = \App\Models\Gate::whereIn('station_id', $assignedStations)
+                        ->where('is_active', true)
+                        ->pluck('id')
+                        ->toArray();
+                    
+                    if (!empty($operatorGates)) {
+                        $detections = $detections->whereIn('gate_id', $operatorGates);
+                    } else {
+                        // No gates found for operator's stations
+                        $detections = collect([]);
+                    }
+                } else {
+                    // Operator has no assigned stations
+                    $detections = collect([]);
+                }
+            }
+
+            // Load vehicle and active passage information for each detection
+            $detectionsWithPassage = $detections->map(function ($detection) {
+                $plateNumber = trim($detection->numberplate);
+                if (empty($plateNumber)) {
+                    return null;
+                }
+
+                // Get vehicle
+                $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
+                if (!$vehicle) {
+                    return null;
+                }
+
+                // Get active passage
+                $lookupResult = $this->vehiclePassageService->quickPlateLookup($plateNumber);
+                $activePassage = null;
+                if ($lookupResult['success'] && isset($lookupResult['data']['active_passage'])) {
+                    $activePassage = $lookupResult['data']['active_passage'];
+                }
+
+                return [
+                    'id' => $detection->id,
+                    'numberplate' => $detection->numberplate,
+                    'detection_timestamp' => $detection->detection_timestamp,
+                    'gate_id' => $detection->gate_id,
+                    'direction' => $detection->direction,
+                    'make_str' => $detection->make_str,
+                    'model_str' => $detection->model_str,
+                    'color_str' => $detection->color_str,
+                    'processing_status' => $detection->processing_status,
+                    'processing_notes' => $detection->processing_notes,
+                    'vehicle' => $vehicle,
+                    'active_passage' => $activePassage,
+                ];
+            })->filter()->values();
+
+            return $this->sendResponse($detectionsWithPassage, 'Pending exit detections retrieved successfully');
+
+        } catch (\Exception $e) {
+            Log::error('Error retrieving pending exit detections', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return $this->sendError('Error retrieving pending exit detections', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Process detection with vehicle type
      *
      * @param Request $request
@@ -529,6 +677,96 @@ class CameraDetectionController extends BaseController
             ]);
 
             return $this->sendError('Error processing detection', ['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Process exit detection with operator confirmation
+     *
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function processExitDetection(Request $request, int $id)
+    {
+        try {
+            $detection = $this->repository->findById($id);
+
+            if (!$detection) {
+                return $this->sendError('Detection not found', [], 404);
+            }
+
+            // Check if detection is pending exit
+            if ($detection->processing_status !== 'pending_exit') {
+                return $this->sendError('Detection is not pending exit confirmation', [], 400);
+            }
+
+            $plateNumber = trim($detection->numberplate);
+            if (empty($plateNumber)) {
+                return $this->sendError('Plate number is empty', [], 400);
+            }
+
+            // Get operator ID
+            $operatorId = auth()->id() ?? $this->getSystemOperatorId();
+            $gateId = $detection->gate_id;
+
+            // Prepare additional data
+            $additionalData = [
+                'make' => $detection->make_str,
+                'model' => $detection->model_str,
+                'color' => $detection->color_str,
+                'notes' => 'Processed from camera detection - exit confirmation',
+                'detection_timestamp' => $detection->detection_timestamp,
+                'camera_detection_log_id' => $detection->id,
+                'payment_confirmed' => $request->input('payment_confirmed', false),
+            ];
+
+            // Process exit
+            $result = $this->vehiclePassageService->processVehicleExit(
+                $plateNumber,
+                $gateId,
+                $operatorId,
+                $additionalData
+            );
+
+            // Mark detection as processed if successful
+            if ($result && isset($result['success']) && $result['success']) {
+                $passageId = 'N/A';
+                if (isset($result['data'])) {
+                    if (is_object($result['data']) && isset($result['data']->id)) {
+                        $passageId = $result['data']->id;
+                    } elseif (is_array($result['data']) && isset($result['data']['id'])) {
+                        $passageId = $result['data']['id'];
+                    }
+                }
+                
+                $detection->markAsProcessed(
+                    "Processed as exit with operator confirmation. Passage ID: {$passageId}"
+                );
+
+                return $this->sendResponse([
+                    'detection' => $detection,
+                    'passage' => $result['data'] ?? null,
+                    'result' => $result,
+                ], 'Exit detection processed successfully');
+            } else {
+                $errorMessage = isset($result['message']) ? $result['message'] : 'Unknown error';
+                $detection->markAsFailed("Failed to process exit: {$errorMessage}");
+                
+                return $this->sendError('Failed to process exit detection', [
+                    'error' => $errorMessage,
+                    'result' => $result,
+                ], 500);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Error processing exit detection', [
+                'detection_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->sendError('Error processing exit detection', ['error' => $e->getMessage()], 500);
         }
     }
 
