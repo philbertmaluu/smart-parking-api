@@ -426,10 +426,19 @@ class CameraDetectionService
                         }
 
                         // Check if vehicle has active passage (is parked)
+                        // Use a more reliable check by querying the database directly
                         $lookupResult = $this->passageService->quickPlateLookup($plateNumber);
                         $hasActivePassage = $lookupResult['success'] && 
                                            isset($lookupResult['data']['active_passage']) && 
                                            $lookupResult['data']['active_passage'];
+                        
+                        // Log the active passage check for debugging
+                        Log::debug('Active passage check for existing vehicle', [
+                            'detection_id' => $detection->id,
+                            'plate_number' => $plateNumber,
+                            'has_active_passage' => $hasActivePassage,
+                            'lookup_result' => $lookupResult,
+                        ]);
 
                         // Get gate to check gate type
                         $gate = \App\Models\Gate::find($gateId);
@@ -454,12 +463,25 @@ class CameraDetectionService
                                 'processing_status' => 'pending_exit',
                                 'processing_notes' => 'Vehicle has active passage - awaiting exit confirmation',
                             ]);
-                            Log::info('Detection marked as pending exit', [
+                            Log::info('Detection marked as pending exit (existing vehicle with active passage)', [
                                 'detection_id' => $detection->id,
                                 'plate_number' => $plateNumber,
                                 'gate_id' => $gateId,
+                                'gate_type' => $gate->gate_type,
+                                'direction' => $direction,
+                                'vehicle_exists' => true,
                             ]);
                             continue; // Skip auto-processing, wait for operator confirmation
+                        }
+                        
+                        // Log when existing vehicle has no active passage (will be processed as entry)
+                        if (!$hasActivePassage) {
+                            Log::info('Existing vehicle detected with no active passage - processing as entry', [
+                                'detection_id' => $detection->id,
+                                'plate_number' => $plateNumber,
+                                'gate_id' => $gateId,
+                                'direction' => $direction,
+                            ]);
                         }
 
                         // Prepare additional data from detection
@@ -539,18 +561,89 @@ class CameraDetectionService
                             );
                             $processed++;
                         } else {
-                            // Mark as processed with error note
+                            // Handle specific error cases
                             $errorMessage = isset($result['message']) ? $result['message'] : 'Unknown error';
-                            $detection->markAsProcessed("Failed to process: {$errorMessage}");
-                            $errors++;
                             
-                            Log::warning('Failed to process camera detection into passage', [
-                                'detection_id' => $detection->id,
-                                'plate_number' => $plateNumber,
-                                'direction' => $direction,
-                                'error' => $errorMessage,
-                                'result' => $result,
-                            ]);
+                            // If vehicle already has an active passage, mark as pending_exit
+                            // This can happen if the initial check missed it (race condition) or if passage was created between check and processing
+                            if (stripos($errorMessage, 'Vehicle already has an active passage') !== false) {
+                                // Check gate supports exit before marking as pending_exit
+                                if ($gateSupportsExit) {
+                                    $detection->update([
+                                        'processing_status' => 'pending_exit',
+                                        'processing_notes' => 'Vehicle already has an active passage - awaiting exit confirmation',
+                                    ]);
+                                    Log::info('Detection marked as pending exit (vehicle has active passage)', [
+                                        'detection_id' => $detection->id,
+                                        'plate_number' => $plateNumber,
+                                        'gate_id' => $gateId,
+                                        'direction' => $direction,
+                                    ]);
+                                    continue; // Skip marking as processed, wait for operator confirmation
+                                } else {
+                                    // Gate doesn't support exit, mark as processed with note
+                                    $detection->markAsProcessed("Vehicle already has active passage but gate doesn't support exit");
+                                    Log::warning('Vehicle has active passage but gate does not support exit', [
+                                        'detection_id' => $detection->id,
+                                        'plate_number' => $plateNumber,
+                                        'gate_id' => $gateId,
+                                        'gate_type' => $gate->gate_type,
+                                    ]);
+                                }
+                            } 
+                            // Handle gate not found - shouldn't happen but handle gracefully
+                            elseif (stripos($errorMessage, 'Gate not found') !== false) {
+                                $detection->markAsFailed("Gate not found: {$errorMessage}");
+                                $errors++;
+                                Log::error('Gate not found during processing (should have been caught earlier)', [
+                                    'detection_id' => $detection->id,
+                                    'plate_number' => $plateNumber,
+                                    'gate_id' => $gateId,
+                                    'error' => $errorMessage,
+                                ]);
+                            }
+                            // Handle pricing not found - this is a recoverable error, don't mark as processed
+                            elseif (stripos($errorMessage, 'No pricing found') !== false || 
+                                    stripos($errorMessage, 'pricing') !== false) {
+                                // Mark as pending_vehicle_type so operator can handle pricing configuration
+                                $detection->update([
+                                    'processing_status' => 'pending_vehicle_type',
+                                    'processing_notes' => "Pricing issue: {$errorMessage}",
+                                ]);
+                                Log::warning('Detection marked as pending due to pricing issue', [
+                                    'detection_id' => $detection->id,
+                                    'plate_number' => $plateNumber,
+                                    'error' => $errorMessage,
+                                ]);
+                                continue; // Don't mark as processed, allow retry
+                            }
+                            // Handle vehicle not found - shouldn't happen since we check before processing
+                            elseif (stripos($errorMessage, 'Vehicle not found') !== false) {
+                                // Mark as pending_vehicle_type since vehicle lookup failed
+                                $detection->update([
+                                    'processing_status' => 'pending_vehicle_type',
+                                    'processing_notes' => "Vehicle lookup failed: {$errorMessage}",
+                                ]);
+                                Log::warning('Vehicle not found during processing (should have been caught earlier)', [
+                                    'detection_id' => $detection->id,
+                                    'plate_number' => $plateNumber,
+                                    'error' => $errorMessage,
+                                ]);
+                                continue; // Don't mark as processed, allow retry
+                            }
+                            // For other errors, mark as processed with error note
+                            else {
+                                $detection->markAsProcessed("Failed to process: {$errorMessage}");
+                                $errors++;
+                                
+                                Log::warning('Failed to process camera detection into passage', [
+                                    'detection_id' => $detection->id,
+                                    'plate_number' => $plateNumber,
+                                    'direction' => $direction,
+                                    'error' => $errorMessage,
+                                    'result' => $result,
+                                ]);
+                            }
                         }
 
                     } catch (Exception $e) {
