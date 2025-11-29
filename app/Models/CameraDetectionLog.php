@@ -124,6 +124,17 @@ class CameraDetectionLog extends Model
     }
 
     /**
+     * Scope a query to only include detections pending exit.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopePendingExit($query)
+    {
+        return $query->where('processing_status', 'pending_exit');
+    }
+
+    /**
      * Scope a query to filter by processing status.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query
@@ -198,6 +209,20 @@ class CameraDetectionLog extends Model
     {
         return $this->update([
             'processing_status' => 'pending_vehicle_type',
+            'processing_notes' => $notes,
+        ]);
+    }
+
+    /**
+     * Mark detection as pending exit.
+     *
+     * @param string|null $notes
+     * @return bool
+     */
+    public function markAsPendingExit(?string $notes = null): bool
+    {
+        return $this->update([
+            'processing_status' => 'pending_exit',
             'processing_notes' => $notes,
         ]);
     }
