@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Repositories\CameraDetectionLogRepository;
+use App\Repositories\VehicleRepository;
 use App\Services\VehiclePassageService;
 use App\Models\CameraDetectionLog;
 use App\Models\User;
@@ -21,14 +22,16 @@ class CameraDetectionService
     private int $computerId;
     private int $gateId;
     private CameraDetectionLogRepository $repository;
+    private VehicleRepository $vehicleRepository;
     private ?VehiclePassageService $passageService = null;
 
-    public function __construct(CameraDetectionLogRepository $repository)
+    public function __construct(CameraDetectionLogRepository $repository, VehicleRepository $vehicleRepository)
     {
         $this->cameraIp = env('CAMERA_IP', '192.168.0.109');
         $this->computerId = (int) env('CAMERA_COMPUTER_ID', 1);
         $this->gateId = (int) env('CAMERA_GATE_ID', 1);
         $this->repository = $repository;
+        $this->vehicleRepository = $vehicleRepository;
     }
 
     /**
@@ -51,7 +54,14 @@ class CameraDetectionService
     public function fetchCameraLogs(?Carbon $dateTime = null): array
     {
         try {
-            $dateTime = $dateTime ?? now();
+            // IMPORTANT: Camera's internal clock appears to be incorrect (showing 2000 dates)
+            // Query from a very old date (2000-01-01) to ensure we get ALL detections
+            // The camera API returns results from the specified date onwards
+            if ($dateTime === null) {
+                // Use a date that's guaranteed to be before any camera detection
+                // Camera seems to use 2000-01-01 as base, so query from there
+                $dateTime = Carbon::parse('2000-01-01 00:00:00');
+            }
             
             // Format date as required by API: YYYY-MM-DDTHH:mm:ss.SSS
             $dateParam = $dateTime->format('Y-m-d\TH:i:s.v');
@@ -293,6 +303,7 @@ class CameraDetectionService
             'br_time' => $detection['br_time'] ?? 0,
             'raw_data' => $detection, // Store complete raw response
             'processed' => false,
+            'processing_status' => 'pending',
         ];
     }
 
@@ -331,7 +342,12 @@ class CameraDetectionService
 
         try {
             // Get all unprocessed detections ordered by timestamp (oldest first)
-            $unprocessedDetections = $this->repository->getUnprocessedDetections();
+            // Exclude detections that are pending vehicle type (they need manual intervention)
+            $unprocessedDetections = $this->repository->getUnprocessedDetections()
+                ->filter(function($detection) {
+                    $status = $detection->processing_status;
+                    return $status !== 'pending_vehicle_type' && ($status === null || $status === 'pending');
+                });
 
             if ($unprocessedDetections->isEmpty()) {
                 return [
@@ -358,6 +374,19 @@ class CameraDetectionService
                     $direction = $detection->direction;
                     $plateNumber = trim($detection->numberplate);
                     $gateId = $detection->gate_id ?? $this->gateId;
+
+                    // Check if vehicle exists before processing
+                    $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
+                    
+                    if (!$vehicle) {
+                        // Vehicle doesn't exist - mark as pending vehicle type
+                        $detection->markAsPendingVehicleType('Vehicle not found - awaiting vehicle type selection');
+                        Log::info('Detection marked as pending vehicle type', [
+                            'detection_id' => $detection->id,
+                            'plate_number' => $plateNumber,
+                        ]);
+                        continue; // Skip processing, wait for manual intervention
+                    }
 
                     // Prepare additional data from detection
                     $additionalData = [
