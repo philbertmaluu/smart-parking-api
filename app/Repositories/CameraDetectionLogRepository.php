@@ -35,22 +35,30 @@ class CameraDetectionLogRepository extends BaseRepository
 
     /**
      * Get detections pending vehicle type selection.
+     * Ordered by oldest first (FIFO queue) to ensure first-come-first-served processing.
      *
      * @return Collection
      */
     public function getPendingVehicleTypeDetections(): Collection
     {
-        return $this->model->pendingVehicleType()->orderBy('detection_timestamp', 'desc')->get();
+        return $this->model->pendingVehicleType()
+            ->orderBy('detection_timestamp', 'asc')  // Oldest first for FIFO queue
+            ->orderBy('id', 'asc')  // Secondary sort for consistency
+            ->get();
     }
 
     /**
      * Get detections pending exit confirmation.
+     * Ordered by oldest first (FIFO queue) to ensure first-come-first-served processing.
      *
      * @return Collection
      */
     public function getPendingExitDetections(): Collection
     {
-        return $this->model->pendingExit()->orderBy('detection_timestamp', 'desc')->get();
+        return $this->model->pendingExit()
+            ->orderBy('detection_timestamp', 'asc')  // Oldest first for FIFO queue
+            ->orderBy('id', 'asc')  // Secondary sort for consistency
+            ->get();
     }
 
     /**
