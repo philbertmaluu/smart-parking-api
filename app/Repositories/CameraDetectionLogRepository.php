@@ -44,6 +44,16 @@ class CameraDetectionLogRepository extends BaseRepository
     }
 
     /**
+     * Get detections pending exit confirmation.
+     *
+     * @return Collection
+     */
+    public function getPendingExitDetections(): Collection
+    {
+        return $this->model->pendingExit()->orderBy('detection_timestamp', 'desc')->get();
+    }
+
+    /**
      * Get detections by plate number.
      *
      * @param string $plateNumber
