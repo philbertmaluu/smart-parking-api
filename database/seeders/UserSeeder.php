@@ -22,10 +22,10 @@ class UserSeeder extends Seeder
 
         // Create System Administrator
         $systemAdmin = User::updateOrCreate(
-            ['email' => 'admin@smartparking.com'],
+            ['email' => 'admin@chatoparking.go.tz'],
             [
                 'username' => 'admin',
-                'email' => 'admin@gmail.com',
+                'email' => 'admin@chatoparking.go.tz',
                 'phone' => '+1234567890',
                 'password' => Hash::make('12341234'),
                 'address' => '123 Admin Street, City, State 12345',
@@ -39,10 +39,10 @@ class UserSeeder extends Seeder
 
         // Create Stations Manager
         $stationsManager = User::updateOrCreate(
-            ['email' => 'manager@gmail.com'],
+            ['email' => 'manager@chatoparking.go.tz'],
             [
                 'username' => 'manager',
-                'email' => 'manager@gmail.com',
+                'email' => 'manager@chatoparking.go.tz',
                 'phone' => '+1234567891',
                 'password' => Hash::make('12341234'),
                 'address' => '456 Manager Avenue, City, State 12345',
@@ -54,55 +54,27 @@ class UserSeeder extends Seeder
             ]
         );
 
-        // Create Gate Operators
-        $gateOperators = [
+        // Create Single Gate Operator
+        $operator = User::updateOrCreate(
+            ['email' => 'operator@chatoparking.go.tz'],
             [
-                'username' => 'operator1',
-                'email' => 'operator1@gmail.com',
+                'username' => 'operator',
+                'email' => 'operator@chatoparking.go.tz',
                 'phone' => '+1234567892',
+                'password' => Hash::make('12341234'),
                 'address' => '789 Operator Lane, City, State 12345',
                 'gender' => 'male',
                 'date_of_birth' => '1992-08-10',
-            ],
-            [
-                'username' => 'operator2',
-                'email' => 'operator2@gmail.com',
-                'phone' => '+1234567893',
-                'address' => '321 Operator Road, City, State 12345',
-                'gender' => 'female',
-                'date_of_birth' => '1988-12-05',
-            ],
-            [
-                'username' => 'operator3',
-                'email' => 'operator3@gmail.com',
-                'phone' => '+1234567894',
-                'address' => '654 Operator Drive, City, State 12345',
-                'gender' => 'male',
-                'date_of_birth' => '1995-03-25',
-            ],
-        ];
-
-        foreach ($gateOperators as $index => $operatorData) {
-            $operator = User::updateOrCreate(
-                ['email' => $operatorData['email']],
-                array_merge($operatorData, [
-                    'password' => Hash::make('12341234'),
-                    'role_id' => $gateOperatorRole->id,
-                    'is_active' => true,
-                    'email_verified_at' => now(),
-                ])
-            );
-        }
+                'role_id' => $gateOperatorRole->id,
+                'is_active' => true,
+                'email_verified_at' => now(),
+            ]
+        );
 
         // Assign permissions to users based on their roles
         $this->assignUserPermissions($systemAdmin, $systemAdminRole);
         $this->assignUserPermissions($stationsManager, $stationsManagerRole);
-
-        // Assign permissions to gate operators
-        $gateOperatorUsers = User::where('role_id', $gateOperatorRole->id)->get();
-        foreach ($gateOperatorUsers as $operator) {
-            $this->assignUserPermissions($operator, $gateOperatorRole);
-        }
+        $this->assignUserPermissions($operator, $gateOperatorRole);
 
         $this->command->info('Users seeded successfully!');
         $this->command->info('Default password for all users: 12341234');
