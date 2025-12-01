@@ -16,8 +16,8 @@ return new class extends Migration
             $table->string('subscription_number')->unique()->comment('Auto-generated');
             $table->integer('account_id')->references('id')->on('accounts');
             $table->integer('bundle_id')->references('id')->on('bundles');
-            $table->timestamp('start_datetime');
-            $table->timestamp('end_datetime');
+            $table->timestamp('start_datetime')->nullable();
+            $table->timestamp('end_datetime')->nullable();
             $table->decimal('amount', 10, 2);
             $table->integer('passages_used')->default(0);
             $table->enum('status', ['pending', 'active', 'suspended', 'expired', 'cancelled'])->default('active');

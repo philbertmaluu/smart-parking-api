@@ -23,3 +23,11 @@ Schedule::command('fetch:camera-data')
     ->timezone('Africa/Dar_es_Salaam')
     ->withoutOverlapping()
     ->runInBackground();
+
+// Schedule gate hardware processor
+// Run every second to forward cached gate actions (open/close/deny) to physical boom gate devices
+Schedule::command('gate:process-hardware --once')
+    ->everySecond()
+    ->timezone('Africa/Dar_es_Salaam')
+    ->withoutOverlapping()
+    ->runInBackground();

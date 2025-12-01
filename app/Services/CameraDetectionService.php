@@ -79,18 +79,46 @@ class CameraDetectionService
             ]);
 
             // Make HTTP request (no authentication required)
-            $response = Http::timeout(30)
-                ->get($url);
+            // Reduced timeout to 10 seconds to fail faster
+            try {
+                $response = Http::timeout(10)
+                    ->get($url);
 
-            if (!$response->successful()) {
-                Log::error('Camera API request failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
+                if (!$response->successful()) {
+                    Log::error('Camera API request failed', [
+                        'status' => $response->status(),
+                        'body' => $response->body(),
+                    ]);
+
+                    return [
+                        'success' => false,
+                        'message' => 'Camera API request failed: ' . $response->status(),
+                        'data' => [],
+                        'count' => 0,
+                    ];
+                }
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                // Handle connection timeout/refused gracefully
+                Log::warning('Camera connection failed (timeout or unreachable)', [
+                    'camera_ip' => $this->cameraIp,
+                    'error' => $e->getMessage(),
                 ]);
 
                 return [
                     'success' => false,
-                    'message' => 'Camera API request failed: ' . $response->status(),
+                    'message' => 'Camera is unreachable or timed out. Please check camera connection.',
+                    'data' => [],
+                    'count' => 0,
+                ];
+            } catch (\Exception $e) {
+                Log::error('Camera API request exception', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => 'Camera API error: ' . $e->getMessage(),
                     'data' => [],
                     'count' => 0,
                 ];

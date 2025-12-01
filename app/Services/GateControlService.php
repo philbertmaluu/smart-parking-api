@@ -174,6 +174,19 @@ class GateControlService
             // Determine gate action based on direction and vehicle status
             $gateAction = $this->determineQuickLookupGateAction($result, $direction);
 
+            // Cache the gate action for hardware integration (only for open/close actions)
+            if (in_array($gateAction, ['open', 'close', 'deny'])) {
+                $cacheKey = "gate_control_{$gateId}";
+                Cache::put($cacheKey, [
+                    'action' => $gateAction,
+                    'timestamp' => now(),
+                    'operator_id' => null,
+                    'reason' => "Quick lookup {$direction} - Vehicle: {$plateNumber}",
+                    'plate_number' => $plateNumber,
+                    'direction' => $direction,
+                ], 60); // Cache for 1 minute
+            }
+
             return $this->createResponse(true, $result['message'], $gateAction, $result['data']);
         } catch (Exception $e) {
             Log::error('Error in quick plate lookup', [
@@ -324,7 +337,7 @@ class GateControlService
     }
 
     /**
-     * Log gate action
+     * Log gate action and cache it for hardware integration
      *
      * @param Gate $gate
      * @param string $plateNumber
@@ -346,6 +359,23 @@ class GateControlService
             'station_name' => $gate->station->name ?? null,
             'timestamp' => now()
         ]);
+
+        // Cache the gate action for hardware integration (only for open/close actions)
+        // This allows the GateHardwareService to pick it up and send to physical boom gate
+        if (in_array($action, ['open', 'close', 'deny'])) {
+            $cacheKey = "gate_control_{$gate->id}";
+            $operatorId = $result['data']['operator_id'] ?? $result['data']['created_by'] ?? null;
+            
+            Cache::put($cacheKey, [
+                'action' => $action,
+                'timestamp' => now(),
+                'operator_id' => $operatorId,
+                'reason' => "Automatic {$direction} processing - Vehicle: {$plateNumber}",
+                'plate_number' => $plateNumber,
+                'direction' => $direction,
+                'passage_id' => $result['data']['id'] ?? null,
+            ], 60); // Cache for 1 minute
+        }
     }
 
     /**

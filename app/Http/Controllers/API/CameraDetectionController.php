@@ -41,14 +41,21 @@ class CameraDetectionController extends BaseController
     public function fetchLogs(Request $request)
     {
         try {
-            $perPage = $request->get('per_page', 100);
+            // Reduced default per_page from 100 to 15 for faster initial load
+            $perPage = min((int)$request->get('per_page', 15), 100); // Max 100, default 15
             $plateNumber = $request->get('plate_number');
             $startDate = $request->get('start_date');
             $endDate = $request->get('end_date');
             $processed = $request->get('processed');
             $gateId = $request->get('gate_id');
 
-            $query = CameraDetectionLog::with('gate:id,name,station_id');
+            // Optimize query: only load necessary relationships and columns
+            $query = CameraDetectionLog::with('gate:id,name,station_id')
+                ->select([
+                    'id', 'camera_detection_id', 'gate_id', 'numberplate', 'originalplate',
+                    'detection_timestamp', 'utc_time', 'located_plate', 'global_confidence',
+                    'processed', 'processed_at', 'processing_status', 'created_at', 'updated_at'
+                ]);
 
             // Filter by gate - operators see only their gates
             $user = auth()->user();
@@ -89,11 +96,12 @@ class CameraDetectionController extends BaseController
                 }
             }
 
-            // Get total count
+            // Get total count (optimized: count before pagination)
             $count = $query->count();
 
-            // Get detections ordered by most recent
+            // Get detections ordered by most recent with limit
             $detections = $query->orderBy('detection_timestamp', 'desc')
+                ->orderBy('id', 'desc') // Secondary sort for consistency
                 ->limit($perPage)
                 ->get();
 
@@ -239,6 +247,19 @@ class CameraDetectionController extends BaseController
                 ], 'Camera logs fetched, stored, and processed successfully');
             }
 
+            // Handle camera connection failures gracefully - return 200 with error message
+            // instead of 500 to prevent frontend errors
+            if (str_contains($result['message'], 'unreachable') || str_contains($result['message'], 'timeout')) {
+                return $this->sendResponse([
+                    'fetched' => 0,
+                    'stored' => 0,
+                    'skipped' => 0,
+                    'errors' => 0,
+                    'camera_unavailable' => true,
+                ], $result['message']);
+            }
+
+            // For other errors, still return 500
             return $this->sendError($result['message'], [], 500);
 
         } catch (\Exception $e) {
