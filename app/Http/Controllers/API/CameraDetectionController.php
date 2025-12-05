@@ -785,6 +785,7 @@ class CameraDetectionController extends BaseController
                 'detection_timestamp' => $detection->detection_timestamp,
                 'camera_detection_log_id' => $detection->id,
                 'payment_confirmed' => $request->input('payment_confirmed', false),
+                'body_type_id' => $request->input('body_type_id'), // Required if vehicle doesn't have body_type_id
             ];
 
             // Process exit
