@@ -15,6 +15,7 @@ class Vehicle extends Model
     protected $fillable = [
         'body_type_id',
         'plate_number',
+        'paid_until',
         'make',
         'model',
         'year',
@@ -31,6 +32,7 @@ class Vehicle extends Model
         'is_registered' => 'boolean',
         'is_exempted' => 'boolean',
         'exemption_expires_at' => 'datetime',
+        'paid_until' => 'datetime',
     ];
 
     /**
