@@ -140,59 +140,58 @@ class VehiclePassageRepository
         // Calculate duration
         $data['duration_minutes'] = $passage->entry_time->diffInMinutes($data['exit_time']);
 
-        // Calculate total amount based on duration (hours spent)
+        // Calculate total amount based on duration (days based on rolling 24-hour periods)
         $entryTime = $passage->entry_time;
         $exitTime = $data['exit_time'];
-        $hoursSpent = $entryTime->diffInHours($exitTime, true);
         
-        // Calculate hours to charge based on smart charging rules:
-        // - Minimum charge: 1 hour
-        // - Up to 1.5 hours: charge 1 hour
-        // - From 1.5 to 2 hours: charge 2 hours
-        // - More than 2 hours: round up to next full hour
-        $hoursToCharge = $this->calculateHoursToCharge($hoursSpent);
+        // Calculate days to charge based on rolling 24-hour periods from entry time
+        // - Minimum charge: 1 day (if parked < 24 hours, still charge 1 day)
+        // - Multiple days: if parked > 24 hours, charge number of full 24-hour periods
+        // - Round up: if partial day exceeds, round up to next full day
+        $daysToCharge = $this->calculateDaysToCharge($entryTime, $exitTime);
         
-        // Calculate total amount: base_amount * hours_to_charge
-        $data['total_amount'] = $passage->base_amount * $hoursToCharge;
+        // Calculate total amount: base_amount * days_to_charge
+        // base_amount now represents daily rate
+        $data['total_amount'] = $passage->base_amount * $daysToCharge;
 
         $passage->update($data);
         return $passage->fresh();
     }
 
     /**
-     * Calculate total billable hours based on parking time and smart charging rules.
+     * Calculate total billable days based on parking time using rolling 24-hour periods.
      *
-     * Charging Rules:
-     * - Minimum charge — always 1 hour
-     *   Even if someone parks for 5 minutes or 30 minutes, they must pay for 1 hour.
-     * - Up to 1 hour 30 minutes → Still charge only 1 hour
-     *   Small "grace period" makes customers feel treated fairly.
-     * - From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
-     * - More than 2 hours → Round up to the next full hour
-     *   After 2 hours, charge by each full hour — always rounding up.
+     * Charging Rules (Daily - Rolling 24-hour periods):
+     * - Minimum charge — always 1 day
+     *   Even if someone parks for 5 minutes or 23 hours, they must pay for 1 day.
+     * - Rolling 24-hour periods — each day starts from entry_time, not calendar day
+     *   Example: Entry at 10 AM Jan 1, exit at 2 PM Jan 1 = 1 day (within 24 hours)
+     *   Example: Entry at 10 AM Jan 1, exit at 11 AM Jan 2 = 2 days (exceeded 24 hours)
+     * - Round up — if partial day exceeds 24 hours, round up to next full day
      *
-     * @param float $hoursSpent  Actual number of hours spent (e.g., 1.25 = 1h15m)
-     * @return int  Billable hours to charge
+     * @param \Carbon\Carbon $entryTime  Entry timestamp
+     * @param \Carbon\Carbon $exitTime  Exit timestamp
+     * @return int  Billable days to charge
      */
-    private function calculateHoursToCharge(float $hoursSpent): int
+    private function calculateDaysToCharge(\Carbon\Carbon $entryTime, \Carbon\Carbon $exitTime): int
     {
-        // Minimum charge — always 1 hour
+        // Calculate total hours spent
+        $hoursSpent = $entryTime->diffInHours($exitTime, true);
+        
+        // Minimum charge — always 1 day
         if ($hoursSpent <= 0) {
             return 1;
         }
 
-        // Up to 1 hour 30 minutes → Still charge only 1 hour
-        if ($hoursSpent <= 1.5) {
+        // If parked less than 24 hours, charge 1 day
+        if ($hoursSpent < 24) {
             return 1;
         }
 
-        // From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
-        if ($hoursSpent < 2.0) {
-            return 2;
-        }
-
-        // More than 2 hours → Round up to the next full hour
-        return (int) ceil($hoursSpent);
+        // If parked 24 hours or more, calculate number of full 24-hour periods
+        // Round up to next full day if there's any partial day
+        $daysSpent = $hoursSpent / 24;
+        return (int) ceil($daysSpent);
     }
 
     /**
