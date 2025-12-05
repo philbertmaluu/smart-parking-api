@@ -386,7 +386,9 @@ class CameraDetectionService
                     ->get()
                     ->filter(function($detection) {
                         $status = $detection->processing_status;
-                        return $status !== 'pending_vehicle_type' && ($status === null || $status === 'pending');
+                        // Allow processing of pending_vehicle_type detections (they can be processed on entry now)
+                        // Only exclude if status is 'failed' or 'processed'
+                        return $status !== 'failed' && ($status === null || $status === 'pending' || $status === 'pending_vehicle_type');
                     });
 
                 if ($unprocessedDetections->isEmpty()) {
@@ -436,24 +438,8 @@ class CameraDetectionService
                             continue;
                         }
 
-                        // Check if vehicle exists before processing
-                        $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
-                        
-                        if (!$vehicle) {
-                            // Vehicle doesn't exist - mark as pending vehicle type
-                            // Use update() directly to avoid race conditions
-                            $detection->update([
-                                'processing_status' => 'pending_vehicle_type',
-                                'processing_notes' => 'Vehicle not found - awaiting vehicle type selection',
-                            ]);
-                            Log::info('Detection marked as pending vehicle type', [
-                                'detection_id' => $detection->id,
-                                'plate_number' => $plateNumber,
-                            ]);
-                            continue; // Skip processing, wait for manual intervention
-                        }
-
                         // Check if vehicle has active passage (is parked)
+                        // Note: Vehicle will be created automatically if it doesn't exist (with nullable body_type_id)
                         // Use a more reliable check by querying the database directly
                         $lookupResult = $this->passageService->quickPlateLookup($plateNumber);
                         $hasActivePassage = $lookupResult['success'] && 
@@ -645,19 +631,16 @@ class CameraDetectionService
                                 ]);
                                 continue; // Don't mark as processed, allow retry
                             }
-                            // Handle vehicle not found - shouldn't happen since we check before processing
+                            // Handle vehicle not found - vehicle should be created automatically
+                            // This shouldn't happen, but if it does, mark as failed
                             elseif (stripos($errorMessage, 'Vehicle not found') !== false) {
-                                // Mark as pending_vehicle_type since vehicle lookup failed
-                                $detection->update([
-                                    'processing_status' => 'pending_vehicle_type',
-                                    'processing_notes' => "Vehicle lookup failed: {$errorMessage}",
-                                ]);
-                                Log::warning('Vehicle not found during processing (should have been caught earlier)', [
+                                $detection->markAsFailed("Vehicle creation failed: {$errorMessage}");
+                                $errors++;
+                                Log::error('Vehicle not found during processing - creation should have happened', [
                                     'detection_id' => $detection->id,
                                     'plate_number' => $plateNumber,
                                     'error' => $errorMessage,
                                 ]);
-                                continue; // Don't mark as processed, allow retry
                             }
                             // For other errors, mark as processed with error note
                             else {
