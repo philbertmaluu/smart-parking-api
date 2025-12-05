@@ -55,6 +55,9 @@ class VehiclePassageService
             $vehicle = $this->findOrCreateVehicle($plateNumber, $additionalData);
 
 
+            // Check if vehicle has an active paid pass within 24 hours
+            $paidPassActive = $this->isWithinPaidPassWindow($vehicle, $activePassage->entry_time, now());
+
             // Get gate and station information
             $gate = Gate::with('station')->findOrFail($gateId);
 
@@ -187,10 +190,52 @@ class VehiclePassageService
                 ];
             }
 
+            // Refresh vehicle to get latest paid_until status
+            $vehicle->refresh();
+
+            // Check if vehicle has body_type_id - required for payment calculation on exit
+            if (!$vehicle->body_type_id) {
+                // Check if body_type_id is provided in additional data
+                if (isset($additionalData['body_type_id']) && $additionalData['body_type_id']) {
+                    // Update vehicle with body type
+                    $vehicle->update(['body_type_id' => $additionalData['body_type_id']]);
+                    $vehicle->refresh();
+                    
+                    // Recalculate pricing for the passage with the new body type
+                    $gate = Gate::with('station')->findOrFail($gateId);
+                    $account = $this->getAccountForVehicle($vehicle, $additionalData);
+                    $pricing = $this->pricingService->calculatePricing($vehicle, $gate->station, $account);
+                    
+                    // Update passage with new pricing
+                    $activePassage->update([
+                        'base_amount' => $pricing['base_amount'],
+                        'discount_amount' => $pricing['discount_amount'],
+                        'total_amount' => $pricing['total_amount'],
+                    ]);
+                    $activePassage->refresh();
+                } else {
+                    // Vehicle type is required for payment calculation
+                    DB::rollBack();
+                    return [
+                        'success' => false,
+                        'message' => 'Vehicle type is required for exit processing',
+                        'data' => [
+                            'vehicle' => $vehicle,
+                            'passage' => $activePassage,
+                            'requires_vehicle_type' => true
+                        ],
+                        'gate_action' => 'require_vehicle_type'
+                    ];
+                }
+            }
+
             // Get gate and station information
             $gate = Gate::with('station')->findOrFail($gateId);
 
-            // Complete passage exit
+            // Check if vehicle has an active paid pass (paid within last 24 hours)
+            $paidPassActive = $this->isWithinPaidPassWindow($vehicle, $activePassage->entry_time, now());
+
+            // Complete passage exit (this will calculate days and total amount)
             $exitData = [
                 'exit_time' => now(),
                 'exit_operator_id' => $operatorId,
@@ -200,6 +245,23 @@ class VehiclePassageService
             ];
 
             $passage = $this->passageRepository->completePassageExit($activePassage->id, $exitData);
+
+            // If a paid pass is active, override amounts to zero and mark as no-fee exit
+            if ($paidPassActive) {
+                $passage->update([
+                    'discount_amount' => $passage->total_amount,
+                    'total_amount' => 0,
+                ]);
+                $passage->setAttribute('paid_pass_active', true);
+            }
+
+            // If payment was due and processed (non-zero total), mark vehicle as paid for 24 hours from exit time
+            if (!$paidPassActive && $passage->total_amount > 0) {
+                $vehicle->update([
+                    'paid_until' => $passage->exit_time->copy()->addHours(24),
+                ]);
+                $vehicle->refresh();
+            }
 
             // Determine gate action based on payment status
             $gateAction = $this->determineExitGateAction($passage, $additionalData);
@@ -213,10 +275,14 @@ class VehiclePassageService
                 'operator_id' => $operatorId
             ]);
 
+            // Add paid_pass_active to passage data for frontend
+            $passageData = $passage->toArray();
+            $passageData['paid_pass_active'] = $paidPassActive;
+
             return [
                 'success' => true,
                 'message' => 'Vehicle exit processed successfully',
-                'data' => $passage,
+                'data' => $passageData,
                 'gate_action' => $gateAction,
                 'vehicle' => $vehicle
             ];
@@ -304,9 +370,10 @@ class VehiclePassageService
 
         if (!$vehicle) {
             // Create new vehicle if not found
+            // body_type_id can be null - will be set on exit if needed
             $vehicleData = [
                 'plate_number' => $plateNumber,
-                'body_type_id' => $additionalData['body_type_id'] ?? 1, // Default body type
+                'body_type_id' => $additionalData['body_type_id'] ?? null, // Nullable - set on exit if needed
                 'make' => $additionalData['make'] ?? null,
                 'model' => $additionalData['model'] ?? null,
                 'year' => $additionalData['year'] ?? null,
@@ -368,6 +435,13 @@ class VehiclePassageService
      */
     private function determineExitGateAction(VehiclePassage $passage, array $additionalData = []): string
     {
+        // If vehicle has an active paid pass within 24 hours, allow exit
+        $passage->loadMissing('vehicle');
+        $vehicle = $passage->vehicle;
+        if ($vehicle && $this->isWithinPaidPassWindow($vehicle, $passage->entry_time, now())) {
+            return 'allow';
+        }
+
         // If free or exempted, allow exit
         if ($passage->passage_type === 'free' || $passage->passage_type === 'exempted') {
             return 'allow';
@@ -383,8 +457,55 @@ class VehiclePassageService
             return 'allow';
         }
 
+        // Check if vehicle already paid within 24-hour period (same-day payment)
+        if ($this->checkSameDayPayment($passage)) {
+            return 'allow';
+        }
+
         // For cash customers, require payment confirmation
         return 'require_payment';
+    }
+
+    /**
+     * Check if vehicle has already paid within 24-hour rolling period from entry time
+     *
+     * @param VehiclePassage $passage
+     * @return bool
+     */
+    private function checkSameDayPayment(VehiclePassage $passage): bool
+    {
+        // Only check for cash payments (toll passages)
+        if ($passage->passage_type !== 'toll') {
+            return false;
+        }
+
+        // Check if there's a valid receipt within 24-hour period from entry time
+        $hasValidReceipt = $this->receiptRepository->hasValidReceiptInPeriod(
+            $passage->vehicle_id,
+            $passage->entry_time,
+            $passage->id // Exclude current passage from check
+        );
+
+        if ($hasValidReceipt) {
+            Log::info('Vehicle has valid receipt within 24-hour period', [
+                'passage_id' => $passage->id,
+                'vehicle_id' => $passage->vehicle_id,
+                'entry_time' => $passage->entry_time,
+            ]);
+            return true;
+        }
+
+        // Also check if current passage has a receipt (paid on entry)
+        $currentReceipts = $this->receiptRepository->getReceiptsByVehiclePassage($passage->id);
+        if ($currentReceipts->isNotEmpty()) {
+            Log::info('Current passage has receipt - payment already made', [
+                'passage_id' => $passage->id,
+                'vehicle_id' => $passage->vehicle_id,
+            ]);
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -397,6 +518,175 @@ class VehiclePassageService
     public function getDashboardStatistics(string $startDate, string $endDate): array
     {
         return $this->passageRepository->getPassageStatistics($startDate, $endDate);
+    }
+
+    /**
+     * Get exit pricing preview (before processing exit)
+     * Calculates duration, days, and total amount without completing exit
+     *
+     * @param string $plateNumber
+     * @param int|null $bodyTypeId
+     * @return array
+     */
+    public function getExitPricingPreview(string $plateNumber, ?int $bodyTypeId = null): array
+    {
+        try {
+            // Find vehicle
+            $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
+            if (!$vehicle) {
+                return [
+                    'success' => false,
+                    'message' => 'Vehicle not found',
+                    'data' => null
+                ];
+            }
+
+            // Get active passage
+            $activePassage = $this->passageRepository->getActivePassageByVehicle($vehicle->id);
+            if (!$activePassage) {
+                return [
+                    'success' => false,
+                    'message' => 'No active passage found for vehicle',
+                    'data' => null
+                ];
+            }
+
+            // Refresh vehicle to get latest paid_until status
+            $vehicle->refresh();
+
+            // Use provided body_type_id or vehicle's existing one
+            $finalBodyTypeId = $bodyTypeId ?? $vehicle->body_type_id;
+            
+            if (!$finalBodyTypeId) {
+                return [
+                    'success' => false,
+                    'message' => 'Vehicle type is required for pricing calculation',
+                    'data' => [
+                        'vehicle' => $vehicle,
+                        'passage' => $activePassage,
+                        'requires_vehicle_type' => true
+                    ]
+                ];
+            }
+
+            // Update vehicle with body type if provided
+            if ($bodyTypeId && !$vehicle->body_type_id) {
+                $vehicle->update(['body_type_id' => $bodyTypeId]);
+                $vehicle->refresh();
+            }
+
+            // Check if vehicle has an active paid pass within 24 hours
+            $paidPassActive = $this->isWithinPaidPassWindow($vehicle, $activePassage->entry_time, now());
+
+            // Get gate and station
+            $gate = Gate::with('station')->findOrFail($activePassage->entry_gate_id);
+            
+            // Recalculate pricing with vehicle type
+            $account = $this->getAccountForVehicle($vehicle);
+            $pricing = $this->pricingService->calculatePricing($vehicle, $gate->station, $account);
+            
+            // Calculate duration and days
+            $entryTime = $activePassage->entry_time;
+            $exitTime = now();
+            $durationMinutes = $entryTime->diffInMinutes($exitTime);
+            $durationHours = $entryTime->diffInHours($exitTime, true);
+            
+            // Calculate days based on rolling 24-hour periods
+            $daysToCharge = $paidPassActive ? 0 : $this->calculateDaysToCharge($entryTime, $exitTime);
+            
+            // Calculate total amount
+            $baseAmount = $paidPassActive ? 0 : ($pricing['base_amount'] ?? 0);
+            $totalAmount = $baseAmount * $daysToCharge;
+            
+            // Check if vehicle already paid within 24 hours
+            $hasValidReceipt = $this->receiptRepository->hasValidReceiptInPeriod(
+                $vehicle->id,
+                $entryTime,
+                $activePassage->id
+            );
+            
+            // Check if current passage has receipt (paid on entry)
+            $currentReceipts = $this->receiptRepository->getReceiptsByVehiclePassage($activePassage->id);
+            $hasCurrentReceipt = $currentReceipts->isNotEmpty();
+            
+            // Determine if payment is needed
+            $needsPayment = !$hasValidReceipt && !$hasCurrentReceipt && !$paidPassActive && $totalAmount > 0;
+            $isWithin24Hours = $durationHours < 24;
+            $noFee = $paidPassActive || ($isWithin24Hours && ($hasValidReceipt || $hasCurrentReceipt));
+
+            return [
+                'success' => true,
+                'message' => 'Exit pricing calculated',
+                'data' => [
+                    'vehicle' => $vehicle,
+                    'passage' => $activePassage,
+                    'entry_time' => $entryTime,
+                    'exit_time' => $exitTime,
+                    'duration_minutes' => $durationMinutes,
+                    'duration_hours' => $durationHours,
+                    'days_to_charge' => $daysToCharge,
+                    'base_amount' => $baseAmount,
+                    'total_amount' => $totalAmount,
+                    'pricing' => $pricing,
+                    'needs_payment' => $needsPayment,
+                    'no_fee' => $noFee,
+                    'paid_pass_active' => $paidPassActive,
+                    'has_valid_receipt' => $hasValidReceipt || $hasCurrentReceipt,
+                    'is_within_24_hours' => $isWithin24Hours,
+                ]
+            ];
+        } catch (Exception $e) {
+            Log::error('Error calculating exit pricing preview', [
+                'plate_number' => $plateNumber,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Error calculating exit pricing: ' . $e->getMessage(),
+                'data' => null
+            ];
+        }
+    }
+
+    /**
+     * Check if vehicle has an active paid pass (paid exit) that covers the current entry/exit window.
+     */
+    private function isWithinPaidPassWindow(Vehicle $vehicle, \Carbon\Carbon $entryTime, \Carbon\Carbon $now): bool
+    {
+        if (!$vehicle->paid_until) {
+            return false;
+        }
+
+        // Valid if current time is before paid_until and the entry occurred before paid_until window expires
+        return $now->lt($vehicle->paid_until) && $entryTime->lt($vehicle->paid_until);
+    }
+
+    /**
+     * Calculate days to charge based on rolling 24-hour periods
+     *
+     * @param \Carbon\Carbon $entryTime
+     * @param \Carbon\Carbon $exitTime
+     * @return int
+     */
+    private function calculateDaysToCharge(\Carbon\Carbon $entryTime, \Carbon\Carbon $exitTime): int
+    {
+        $hoursSpent = $entryTime->diffInHours($exitTime, true);
+        
+        // Minimum charge — always 1 day
+        if ($hoursSpent <= 0) {
+            return 1;
+        }
+
+        // If parked less than 24 hours, charge 1 day
+        if ($hoursSpent < 24) {
+            return 1;
+        }
+
+        // If parked 24 hours or more, calculate number of full 24-hour periods
+        // Round up to next full day if there's any partial day
+        $daysSpent = $hoursSpent / 24;
+        return (int) ceil($daysSpent);
     }
 
     /**
