@@ -209,11 +209,47 @@ class VehiclePassageRepository
             'entryOperator'
         ])->whereNull('exit_time')->orderBy('entry_time', 'desc');
         
-        if ($perPage) {
-            return $query->paginate($perPage);
-        }
+        $result = $perPage ? $query->paginate($perPage) : $query->get();
         
-        return $query->get();
+        // Calculate current pricing for each active passage
+        $pricingService = app(\App\Services\PricingService::class);
+        
+        $passages = $perPage ? $result->getCollection() : $result;
+        
+        $passages->transform(function ($passage) use ($pricingService) {
+            // Calculate current pricing if vehicle has body type
+            if ($passage->vehicle && $passage->vehicle->body_type_id && $passage->entryStation) {
+                try {
+                    $pricingResult = $pricingService->calculatePricing(
+                        $passage->vehicle,
+                        $passage->entryStation,
+                        null // No account for now
+                    );
+                    
+                    if (isset($pricingResult['base_amount']) && $pricingResult['base_amount'] > 0) {
+                        // Calculate days parked
+                        $entryTime = new \DateTime($passage->entry_time);
+                        $now = new \DateTime();
+                        $diffHours = ($now->getTimestamp() - $entryTime->getTimestamp()) / 3600;
+                        $daysToCharge = max(1, ceil($diffHours / 24));
+                        
+                        $baseAmount = $pricingResult['base_amount'];
+                        $passage->base_amount = $baseAmount;
+                        $passage->total_amount = $baseAmount * $daysToCharge;
+                    }
+                } catch (\Exception $e) {
+                    // Keep original values if calculation fails
+                    \Log::warning('Failed to calculate pricing for active passage', [
+                        'passage_id' => $passage->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+            
+            return $passage;
+        });
+        
+        return $result;
     }
 
     /**
@@ -368,11 +404,12 @@ class VehiclePassageRepository
             ->whereDate('exit_time', $today->toDateString())
             ->count();
 
-        // Total revenue (all time from completed passages)
+        // Calculate total revenue from all completed passages
+        // Sum all total_amounts from passages with exit_time
         $totalRevenue = $this->model->whereNotNull('exit_time')
             ->sum('total_amount');
 
-        // Revenue today
+        // Revenue from today's completed passages
         $revenueToday = $this->model->whereNotNull('exit_time')
             ->whereDate('exit_time', $today->toDateString())
             ->sum('total_amount');
