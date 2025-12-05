@@ -235,6 +235,20 @@ class VehiclePassageService
             // Check if vehicle has an active paid pass (paid within last 24 hours)
             $paidPassActive = $this->isWithinPaidPassWindow($vehicle, $activePassage->entry_time, now());
 
+            // Recalculate pricing if base_amount is 0 but vehicle now has body_type_id
+            if ($activePassage->base_amount == 0 && $vehicle->body_type_id) {
+                $account = $this->getAccountForVehicle($vehicle, $additionalData);
+                $pricing = $this->pricingService->calculatePricing($vehicle, $gate->station, $account);
+                
+                // Update passage with calculated pricing
+                $activePassage->update([
+                    'base_amount' => $pricing['base_amount'],
+                    'discount_amount' => $pricing['discount_amount'],
+                    'payment_type_id' => $pricing['payment_type_id'],
+                ]);
+                $activePassage->refresh();
+            }
+
             // Complete passage exit (this will calculate days and total amount)
             $exitData = [
                 'exit_time' => now(),
