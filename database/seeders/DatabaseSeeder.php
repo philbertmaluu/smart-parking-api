@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
             UserSeeder::class,
             VehicleBodyTypeSeeder::class,
             PaymentTypeSeeder::class,
+            VehicleBodyTypePriceSeeder::class,
         ]);
 
         $this->command->info('All seeders completed successfully!');
