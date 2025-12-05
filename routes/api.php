@@ -199,6 +199,7 @@ Route::prefix('toll-v1')->group(function () {
         // Vehicle Passage routes
         Route::apiResource('vehicle-passages', VehiclePassageController::class);
         Route::post('vehicle-passages/entry', [VehiclePassageController::class, 'processEntry']);
+        Route::post('vehicle-passages/exit/preview', [VehiclePassageController::class, 'getExitPricingPreview']);
         Route::post('vehicle-passages/exit', [VehiclePassageController::class, 'processExit']);
         Route::post('vehicle-passages/quick-lookup', [VehiclePassageController::class, 'quickLookup']);
         Route::get('vehicle-passages/passage/{passageNumber}', [VehiclePassageController::class, 'getByPassageNumber']);
