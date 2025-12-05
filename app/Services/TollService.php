@@ -34,15 +34,32 @@ class TollService
 
             // Step 2: Determine body type price
             $gate = Gate::with('station')->findOrFail($gateId);
-            $bodyTypePrice = $this->getBodyTypePrice($vehicle->body_type_id, $gate->station_id);
+            
+            // If vehicle doesn't have body_type_id, allow entry without pricing
+            // Pricing will be calculated on exit when vehicle type is provided
+            if (!$vehicle->body_type_id) {
+                Log::info('Vehicle entry without body type - pricing will be calculated on exit', [
+                    'vehicle_id' => $vehicle->id,
+                    'plate_number' => $vehicle->plate_number,
+                    'station_id' => $gate->station_id
+                ]);
+                
+                // Set default base amount to 0 - will be calculated on exit
+                $bodyTypePrice = null;
+                $baseAmount = 0;
+            } else {
+                $bodyTypePrice = $this->getBodyTypePrice($vehicle->body_type_id, $gate->station_id);
 
-            if (!$bodyTypePrice) {
-                DB::rollBack();
-                return [
-                    'success' => false,
-                    'message' => 'No pricing found for this vehicle type at this station',
-                    'gate_action' => 'deny'
-                ];
+                if (!$bodyTypePrice) {
+                    DB::rollBack();
+                    return [
+                        'success' => false,
+                        'message' => 'No pricing found for this vehicle type at this station',
+                        'gate_action' => 'deny'
+                    ];
+                }
+                
+                $baseAmount = $bodyTypePrice->base_price;
             }
 
             // Check if vehicle already has an active passage
@@ -83,9 +100,9 @@ class TollService
                 'entry_gate_id' => $gateId,
                 'entry_station_id' => $gate->station_id,
                 'passage_type' => 'toll',
-                'base_amount' => $bodyTypePrice->base_price,
+                'base_amount' => $baseAmount, // Will be 0 if body_type_id is null
                 'discount_amount' => 0,
-                'total_amount' => $bodyTypePrice->base_price, // Set initial total amount
+                'total_amount' => $baseAmount, // Will be 0 if body_type_id is null, calculated on exit
                 'notes' => $additionalData['notes'] ?? null,
             ]);
 
@@ -96,7 +113,8 @@ class TollService
                 'vehicle_id' => $vehicle->id,
                 'gate_id' => $gateId,
                 'station_id' => $gate->station_id,
-                'body_type_price_per_hour' => $bodyTypePrice->base_price,
+                'body_type_price_per_hour' => $bodyTypePrice?->base_price ?? 0,
+                'body_type_id' => $vehicle->body_type_id,
                 'operator_id' => $operatorId,
                 'entry_time' => $passage->entry_time
             ]);
@@ -112,7 +130,9 @@ class TollService
                     'passage_id' => $passage->id,
                     'vehicle' => $vehicle,
                     'entry_time' => $passage->entry_time,
-                    'price_per_hour' => $bodyTypePrice->base_price
+                    'price_per_hour' => $bodyTypePrice?->base_price ?? 0,
+                    'base_amount' => $baseAmount,
+                    'body_type_id' => $vehicle->body_type_id
                 ]
             ];
 
@@ -339,14 +359,10 @@ class TollService
         $vehicle = Vehicle::where('plate_number', $plateNumber)->first();
 
         if (!$vehicle) {
-            // Require body_type_id for new vehicles
-            if (!isset($additionalData['body_type_id'])) {
-                throw new Exception('Body type ID is required for new vehicles');
-            }
-            
+            // body_type_id is optional - can be set on exit if needed
             $vehicle = Vehicle::create([
                 'plate_number' => $plateNumber,
-                'body_type_id' => $additionalData['body_type_id'],
+                'body_type_id' => $additionalData['body_type_id'] ?? null, // Nullable
                 'make' => $additionalData['make'] ?? null,
                 'model' => $additionalData['model'] ?? null,
                 'year' => $additionalData['year'] ?? null,
@@ -366,8 +382,12 @@ class TollService
      * @param int $stationId
      * @return VehicleBodyTypePrice|null
      */
-    private function getBodyTypePrice(int $bodyTypeId, int $stationId): ?VehicleBodyTypePrice
+    private function getBodyTypePrice(?int $bodyTypeId, int $stationId): ?VehicleBodyTypePrice
     {
+        if (!$bodyTypeId) {
+            return null;
+        }
+        
         return VehicleBodyTypePrice::where('body_type_id', $bodyTypeId)
             ->where('station_id', $stationId)
             ->where('is_active', true)
