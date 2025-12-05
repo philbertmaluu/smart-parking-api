@@ -107,10 +107,10 @@ class VehicleBodyTypePrice extends Model
     {
         $date = $date ?? now()->toDateString();
 
-        return $query->where('effective_from', '<=', $date)
+        return $query->whereRaw('DATE(effective_from) <= ?', [$date])
             ->where(function ($q) use ($date) {
                 $q->whereNull('effective_to')
-                    ->orWhere('effective_to', '>=', $date);
+                    ->orWhereRaw('DATE(effective_to) >= ?', [$date]);
             });
     }
 }
