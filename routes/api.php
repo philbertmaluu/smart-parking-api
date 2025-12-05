@@ -196,21 +196,21 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('bundle-subscriptions/usage-stats', [BundleSubscriptionController::class, 'getWithUsageStats']);
         Route::get('bundle-subscriptions/expiring', [BundleSubscriptionController::class, 'getExpiringSubscriptions']);
 
-        // Vehicle Passage routes
-        Route::apiResource('vehicle-passages', VehiclePassageController::class);
+        // Vehicle Passage routes - specific routes MUST come before apiResource
         Route::post('vehicle-passages/entry', [VehiclePassageController::class, 'processEntry']);
         Route::post('vehicle-passages/exit/preview', [VehiclePassageController::class, 'getExitPricingPreview']);
         Route::post('vehicle-passages/exit', [VehiclePassageController::class, 'processExit']);
         Route::post('vehicle-passages/quick-lookup', [VehiclePassageController::class, 'quickLookup']);
-        Route::get('vehicle-passages/passage/{passageNumber}', [VehiclePassageController::class, 'getByPassageNumber']);
-        Route::get('vehicle-passages/vehicle/{vehicleId}', [VehiclePassageController::class, 'getByVehicle']);
-        Route::get('vehicle-passages/station/{stationId}', [VehiclePassageController::class, 'getByStation']);
         Route::get('vehicle-passages/active/list', [VehiclePassageController::class, 'getActivePassages']);
         Route::get('vehicle-passages/completed/list', [VehiclePassageController::class, 'getCompletedPassages']);
         Route::get('vehicle-passages/statistics', [VehiclePassageController::class, 'getStatistics']);
         Route::get('vehicle-passages/dashboard-summary', [VehiclePassageController::class, 'getDashboardSummary']);
-        Route::put('vehicle-passages/{id}/status', [VehiclePassageController::class, 'updateStatus']);
         Route::get('vehicle-passages/search', [VehiclePassageController::class, 'search']);
+        Route::get('vehicle-passages/passage/{passageNumber}', [VehiclePassageController::class, 'getByPassageNumber']);
+        Route::get('vehicle-passages/vehicle/{vehicleId}', [VehiclePassageController::class, 'getByVehicle']);
+        Route::get('vehicle-passages/station/{stationId}', [VehiclePassageController::class, 'getByStation']);
+        Route::put('vehicle-passages/{id}/status', [VehiclePassageController::class, 'updateStatus']);
+        Route::apiResource('vehicle-passages', VehiclePassageController::class);
 
         // Gate Control routes
         Route::post('gate-control/plate-detection', [GateControlController::class, 'processPlateDetection']);
