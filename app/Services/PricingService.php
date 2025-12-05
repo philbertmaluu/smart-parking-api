@@ -129,6 +129,27 @@ class PricingService
      */
     private function calculateCashPricing(Vehicle $vehicle, Station $station): array
     {
+        // If vehicle doesn't have body_type_id, allow entry without pricing
+        // Pricing will be calculated on exit when vehicle type is provided
+        if (!$vehicle->body_type_id) {
+            Log::info('Vehicle entry without body type - pricing will be calculated on exit', [
+                'vehicle_id' => $vehicle->id,
+                'plate_number' => $vehicle->plate_number,
+                'station_id' => $station->id
+            ]);
+
+            return [
+                'amount' => 0,
+                'payment_type' => 'Cash',
+                'payment_type_id' => PaymentType::where('name', 'Cash')->first()->id,
+                'requires_payment' => false,
+                'description' => 'Vehicle type not set - pricing will be calculated on exit',
+                'base_amount' => 0,
+                'discount_amount' => 0,
+                'total_amount' => 0,
+            ];
+        }
+
         // Get base price from VehicleBodyTypePrice
         $basePrice = $this->getBasePrice($vehicle->body_type_id, $station->id);
 
@@ -167,12 +188,15 @@ class PricingService
     /**
      * Get base price for vehicle body type and station
      *
-     * @param int $bodyTypeId
+     * @param int|null $bodyTypeId
      * @param int $stationId
      * @return VehicleBodyTypePrice|null
      */
-    public function getBasePrice(int $bodyTypeId, int $stationId): ?VehicleBodyTypePrice
+    public function getBasePrice(?int $bodyTypeId, int $stationId): ?VehicleBodyTypePrice
     {
+        if (!$bodyTypeId) {
+            return null;
+        }
         return $this->vehicleBodyTypePriceRepository->getCurrentPrice($bodyTypeId, $stationId);
     }
 
