@@ -179,6 +179,32 @@ class VehiclePassageController extends BaseController
     }
 
     /**
+     * Get exit pricing preview (before processing exit)
+     */
+    public function getExitPricingPreview(Request $request)
+    {
+        try {
+            $request->validate([
+                'plate_number' => 'required|string|max:20',
+                'body_type_id' => 'nullable|exists:vehicle_body_types,id',
+            ]);
+
+            $result = $this->passageService->getExitPricingPreview(
+                $request->plate_number,
+                $request->body_type_id
+            );
+
+            if ($result['success']) {
+                return $this->sendResponse($result['data'], $result['message']);
+            } else {
+                return $this->sendError($result['message'], $result['data'], 400);
+            }
+        } catch (\Exception $e) {
+            return $this->sendError('Error calculating exit pricing', $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * Process vehicle exit with plate number detection
      */
     public function processExit(Request $request)
@@ -188,6 +214,7 @@ class VehiclePassageController extends BaseController
                 'plate_number' => 'required|string|max:20',
                 'gate_id' => 'required|exists:gates,id',
                 'payment_confirmed' => 'nullable|boolean',
+                'body_type_id' => 'nullable|exists:vehicle_body_types,id',
                 'notes' => 'nullable|string|max:500',
             ]);
 
