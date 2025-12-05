@@ -106,7 +106,7 @@ class GateDevice extends Model
     }
 
     /**
-     * Automatically encrypt password when setting
+     * Encode password when setting (using base64 for portability across PCs)
      */
     protected function password(): Attribute
     {
@@ -116,28 +116,25 @@ class GateDevice extends Model
                     return null;
                 }
                 
-                // Check if encryption key is available
-                if (empty(config('app.key'))) {
-                    throw new \RuntimeException('Application encryption key is not set. Please run: php artisan key:generate');
-                }
-                
-                try {
-                    return encrypt($value);
-                } catch (\Exception $e) {
-                    // If encryption fails, store as plain text (not recommended but allows operation)
-                    return $value;
-                }
+                // Use base64 encoding for portability (works without APP_KEY)
+                return base64_encode($value);
             },
             get: function ($value) {
                 if (!$value) {
                     return null;
                 }
                 
+                // Check if it's base64 encoded
+                $decoded = base64_decode($value, true);
+                if ($decoded !== false && base64_encode($decoded) === $value) {
+                    return $decoded;
+                }
+                
+                // If not base64, try to decrypt (for backwards compatibility with old encrypted values)
                 try {
-                    // Try to decrypt - if it's already decrypted or fails, return as-is
                     return decrypt($value);
                 } catch (\Exception $e) {
-                    // If decryption fails, assume it's already plain text or encrypted with different key
+                    // Return as-is if neither works
                     return $value;
                 }
             },

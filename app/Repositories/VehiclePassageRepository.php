@@ -364,8 +364,13 @@ class VehiclePassageRepository
         // Active passages (currently parked)
         $activePassages = $this->model->whereNull('exit_time')->count();
 
-        // Completed today (exited today)
-        $completedToday = $this->model->whereNotNull('exit_time')
+        // Entries today (vehicles that entered today)
+        $entriesToday = $this->model
+            ->whereDate('entry_time', $today->toDateString())
+            ->count();
+
+        // Exits today (completed passages - exited today)
+        $exitsToday = $this->model->whereNotNull('exit_time')
             ->whereDate('exit_time', $today->toDateString())
             ->count();
 
@@ -384,7 +389,9 @@ class VehiclePassageRepository
         return [
             'total_passages' => $totalPassages,
             'active_passages' => $activeNow,
-            'completed_today' => $completedToday,
+            'entries_today' => $entriesToday,
+            'exits_today' => $exitsToday,
+            'completed_today' => $exitsToday,
             'total_revenue' => (float) $totalRevenue,
             'revenue_today' => (float) $revenueToday,
         ];

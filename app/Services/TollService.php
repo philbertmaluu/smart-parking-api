@@ -12,11 +12,17 @@ use App\Models\PaymentType;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Exception;
+use Carbon\Carbon;
 
 class TollService
 {
     /**
-     * Process vehicle entry - simplified toll system
+     * Process vehicle entry - DAILY FLAT-RATE PRICING
+     * 
+     * Pricing Rules:
+     * - Pay ONCE at entry for the entire day (based on body type)
+     * - Same-day re-entry is FREE (already paid today)
+     * - Exit is FREE (no payment required)
      *
      * @param string $plateNumber
      * @param int $gateId
@@ -29,11 +35,13 @@ class TollService
         try {
             DB::beginTransaction();
 
-            // Step 1: Detect the plate number and find/create vehicle
+            // Step 1: Find or create vehicle
             $vehicle = $this->findOrCreateVehicle($plateNumber, $additionalData);
 
-            // Step 2: Determine body type price
+            // Step 2: Get gate and station info
             $gate = Gate::with('station')->findOrFail($gateId);
+            
+            // Step 3: Get daily price for this body type
             $bodyTypePrice = $this->getBodyTypePrice($vehicle->body_type_id, $gate->station_id);
 
             if (!$bodyTypePrice) {
@@ -45,7 +53,7 @@ class TollService
                 ];
             }
 
-            // Check if vehicle already has an active passage
+            // Step 4: Check if vehicle already has an active passage (still inside)
             $activePassage = VehiclePassage::where('vehicle_id', $vehicle->id)
                 ->whereNull('exit_time')
                 ->first();
@@ -54,71 +62,110 @@ class TollService
                 DB::rollBack();
                 return [
                     'success' => false,
-                    'message' => 'Vehicle already has an active passage',
+                    'message' => 'Vehicle is already inside (has active passage)',
                     'gate_action' => 'deny'
                 ];
             }
 
-            // Step 3: Generate passage number
-            $passageNumber = 'PASS-' . date('Ymd') . '-' . str_pad(VehiclePassage::count() + 1, 6, '0', STR_PAD_LEFT);
+            // Step 5: Check if vehicle already PAID today (same-day re-entry = FREE)
+            $alreadyPaidToday = $this->hasVehiclePaidToday($vehicle->id, $gate->station_id);
             
-            // Get default payment type (Cash)
-            $defaultPaymentType = PaymentType::where('name', 'Cash')->first();
-            if (!$defaultPaymentType) {
-                // Create default payment type if it doesn't exist
-                $defaultPaymentType = PaymentType::create([
+            $dailyPrice = $bodyTypePrice->base_price;
+            $amountToCharge = $alreadyPaidToday ? 0 : $dailyPrice;
+            $paymentRequired = !$alreadyPaidToday;
+
+            // Step 6: Generate passage number
+            $passageNumber = 'PASS-' . date('Ymd') . '-' . str_pad(VehiclePassage::whereDate('created_at', today())->count() + 1, 6, '0', STR_PAD_LEFT);
+            
+            // Get payment type
+            $paymentType = PaymentType::where('name', 'Cash')->first();
+            if (!$paymentType) {
+                $paymentType = PaymentType::create([
                     'name' => 'Cash',
                     'description' => 'Cash payment',
                     'is_active' => true
                 ]);
             }
 
-            // Step 4: Create passage entry
+            // Step 7: Create passage entry
             $passage = VehiclePassage::create([
                 'passage_number' => $passageNumber,
                 'vehicle_id' => $vehicle->id,
-                'payment_type_id' => $defaultPaymentType->id,
+                'payment_type_id' => $paymentType->id,
                 'entry_time' => now(),
                 'entry_operator_id' => $operatorId,
                 'entry_gate_id' => $gateId,
                 'entry_station_id' => $gate->station_id,
-                'passage_type' => 'toll',
-                'base_amount' => $bodyTypePrice->base_price,
-                'discount_amount' => 0,
-                'total_amount' => $bodyTypePrice->base_price, // Set initial total amount
-                'notes' => $additionalData['notes'] ?? null,
+                'passage_type' => $alreadyPaidToday ? 'reentry' : 'toll',
+                'base_amount' => $dailyPrice,
+                'discount_amount' => $alreadyPaidToday ? $dailyPrice : 0,
+                'total_amount' => $amountToCharge,
+                'is_paid' => !$paymentRequired, // Mark as paid if re-entry (free)
+                'paid_at' => $alreadyPaidToday ? now() : null,
+                'notes' => $alreadyPaidToday ? 'Same-day re-entry (free)' : ($additionalData['notes'] ?? null),
             ]);
 
-            // Step 5: Log the passage entry
-            Log::info('Vehicle entry processed - Simple Toll', [
+            // Step 8: If payment required, create receipt at ENTRY
+            $receipt = null;
+            if ($paymentRequired) {
+                // Payment is required - operator must confirm payment
+                Log::info('Payment required at entry - Daily Rate', [
+                    'plate_number' => $plateNumber,
+                    'passage_id' => $passage->id,
+                    'daily_price' => $dailyPrice,
+                    'operator_id' => $operatorId
+                ]);
+
+                DB::commit();
+
+                return [
+                    'success' => true,
+                    'message' => 'Payment required at entry',
+                    'gate_action' => 'require_payment',
+                    'requires_payment' => true,
+                    'data' => [
+                        'passage_id' => $passage->id,
+                        'passage_number' => $passageNumber,
+                        'vehicle' => $vehicle->load('bodyType'),
+                        'entry_time' => $passage->entry_time,
+                        'daily_price' => $dailyPrice,
+                        'amount_to_pay' => $amountToCharge,
+                        'is_reentry' => false,
+                        'pricing_type' => 'daily'
+                    ]
+                ];
+            }
+
+            // Free re-entry - just open gate
+            Log::info('Vehicle entry processed - Same-day re-entry (FREE)', [
                 'plate_number' => $plateNumber,
                 'passage_id' => $passage->id,
                 'vehicle_id' => $vehicle->id,
-                'gate_id' => $gateId,
-                'station_id' => $gate->station_id,
-                'body_type_price_per_hour' => $bodyTypePrice->base_price,
-                'operator_id' => $operatorId,
-                'entry_time' => $passage->entry_time
+                'operator_id' => $operatorId
             ]);
 
             DB::commit();
 
-            // Step 3: Open the gate
             return [
                 'success' => true,
-                'message' => 'Vehicle entry processed successfully',
+                'message' => 'Same-day re-entry - No payment required',
                 'gate_action' => 'open',
+                'requires_payment' => false,
                 'data' => [
                     'passage_id' => $passage->id,
-                    'vehicle' => $vehicle,
+                    'passage_number' => $passageNumber,
+                    'vehicle' => $vehicle->load('bodyType'),
                     'entry_time' => $passage->entry_time,
-                    'price_per_hour' => $bodyTypePrice->base_price
+                    'daily_price' => $dailyPrice,
+                    'amount_to_pay' => 0,
+                    'is_reentry' => true,
+                    'pricing_type' => 'daily'
                 ]
             ];
 
         } catch (Exception $e) {
             DB::rollBack();
-            Log::error('Error processing vehicle entry - Simple Toll', [
+            Log::error('Error processing vehicle entry', [
                 'plate_number' => $plateNumber,
                 'gate_id' => $gateId,
                 'error' => $e->getMessage()
@@ -133,7 +180,79 @@ class TollService
     }
 
     /**
-     * Process vehicle exit - simplified toll system
+     * Confirm payment at entry and generate receipt
+     *
+     * @param int $passageId
+     * @param int $operatorId
+     * @param array $paymentData
+     * @return array
+     */
+    public function confirmEntryPayment(int $passageId, int $operatorId, array $paymentData = []): array
+    {
+        try {
+            DB::beginTransaction();
+
+            $passage = VehiclePassage::with('vehicle')->findOrFail($passageId);
+
+            if ($passage->is_paid) {
+                DB::commit();
+                return [
+                    'success' => true,
+                    'message' => 'Already paid',
+                    'gate_action' => 'open',
+                    'data' => [
+                        'passage_id' => $passage->id,
+                        'vehicle' => $passage->vehicle
+                    ]
+                ];
+            }
+
+            // Process payment and generate receipt
+            $receipt = $this->processPayment($passage, $operatorId, $paymentData);
+
+            // Mark passage as paid
+            $passage->update([
+                'is_paid' => true,
+                'paid_at' => now(),
+            ]);
+
+            Log::info('Entry payment confirmed - Daily Rate', [
+                'passage_id' => $passageId,
+                'receipt_id' => $receipt->id,
+                'amount' => $passage->total_amount,
+                'operator_id' => $operatorId
+            ]);
+
+            DB::commit();
+
+            return [
+                'success' => true,
+                'message' => 'Payment confirmed, gate will open',
+                'gate_action' => 'open',
+                'data' => [
+                    'passage_id' => $passage->id,
+                    'vehicle' => $passage->vehicle,
+                    'receipt' => $receipt
+                ]
+            ];
+
+        } catch (Exception $e) {
+            DB::rollBack();
+            Log::error('Error confirming entry payment', [
+                'passage_id' => $passageId,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Error confirming payment: ' . $e->getMessage(),
+                'gate_action' => 'deny'
+            ];
+        }
+    }
+
+    /**
+     * Process vehicle exit - NO PAYMENT REQUIRED (already paid at entry)
      *
      * @param string $plateNumber
      * @param int $gateId
@@ -146,7 +265,7 @@ class TollService
         try {
             DB::beginTransaction();
 
-            // Step 5: Detect the plate number
+            // Find vehicle
             $vehicle = Vehicle::where('plate_number', $plateNumber)->first();
 
             if (!$vehicle) {
@@ -172,65 +291,38 @@ class TollService
                 ];
             }
 
-            // Step 6: Calculate amount based on time spent
+            // Check if paid (should always be paid for daily rate, but check anyway)
+            if (!$activePassage->is_paid && $activePassage->total_amount > 0) {
+                DB::rollBack();
+                return [
+                    'success' => false,
+                    'message' => 'Vehicle has unpaid entry fee',
+                    'gate_action' => 'deny',
+                    'data' => [
+                        'passage_id' => $activePassage->id,
+                        'amount_due' => $activePassage->total_amount
+                    ]
+                ];
+            }
+
+            // Calculate duration for records
             $entryTime = $activePassage->entry_time;
             $exitTime = now();
-            $hoursSpent = $entryTime->diffInHours($exitTime, true);
-            
-            // Calculate hours to charge based on specific rounding rules
-            $hoursToCharge = $this->calculateHoursToCharge($hoursSpent);
-            $totalAmount = $activePassage->base_amount * $hoursToCharge;
+            $duration = $entryTime->diff($exitTime);
 
-            // Update passage with exit information and calculated amount
+            // Update passage with exit information
             $activePassage->update([
                 'exit_time' => $exitTime,
                 'exit_operator_id' => $operatorId,
                 'exit_gate_id' => $gateId,
                 'exit_station_id' => Gate::find($gateId)->station_id,
-                'total_amount' => $totalAmount,
                 'notes' => $additionalData['notes'] ?? $activePassage->notes,
             ]);
 
-            // Check if payment is confirmed
-            $paymentConfirmed = $additionalData['payment_confirmed'] ?? false;
-
-            if (!$paymentConfirmed) {
-                // Step 7: Require payment before opening gate
-                Log::info('Payment required for vehicle exit', [
-                    'plate_number' => $plateNumber,
-                    'passage_id' => $activePassage->id,
-                    'total_amount' => $totalAmount,
-                    'hours_charged' => $hoursToCharge,
-                    'operator_id' => $operatorId
-                ]);
-
-                DB::commit();
-
-                return [
-                    'success' => true,
-                    'message' => 'Payment required before exit',
-                    'gate_action' => 'require_payment',
-                    'data' => [
-                        'passage_id' => $activePassage->id,
-                        'vehicle' => $vehicle,
-                        'total_amount' => $totalAmount,
-                        'hours_charged' => $hoursToCharge,
-                        'entry_time' => $entryTime,
-                        'exit_time' => $exitTime
-                    ]
-                ];
-            }
-
-            // Process payment and generate receipt
-            $receipt = $this->processPayment($activePassage, $operatorId, $additionalData);
-
-            // Step 7: Open the gate for exit
-            Log::info('Vehicle exit processed - Simple Toll', [
+            Log::info('Vehicle exit processed - Daily Rate (No payment at exit)', [
                 'plate_number' => $plateNumber,
                 'passage_id' => $activePassage->id,
-                'total_amount' => $totalAmount,
-                'hours_charged' => $hoursToCharge,
-                'receipt_id' => $receipt->id ?? null,
+                'duration' => $duration->format('%H:%I:%S'),
                 'operator_id' => $operatorId
             ]);
 
@@ -243,17 +335,17 @@ class TollService
                 'data' => [
                     'passage_id' => $activePassage->id,
                     'vehicle' => $vehicle,
-                    'total_amount' => $totalAmount,
-                    'hours_charged' => $hoursToCharge,
                     'entry_time' => $entryTime,
                     'exit_time' => $exitTime,
-                    'receipt' => $receipt
+                    'duration' => $duration->format('%H:%I:%S'),
+                    'amount_paid' => $activePassage->total_amount,
+                    'pricing_type' => 'daily'
                 ]
             ];
 
         } catch (Exception $e) {
             DB::rollBack();
-            Log::error('Error processing vehicle exit - Simple Toll', [
+            Log::error('Error processing vehicle exit', [
                 'plate_number' => $plateNumber,
                 'gate_id' => $gateId,
                 'error' => $e->getMessage()
@@ -268,78 +360,38 @@ class TollService
     }
 
     /**
-     * Confirm payment and open gate
+     * Check if vehicle has already paid today at this station
      *
-     * @param int $passageId
-     * @param int $operatorId
-     * @param array $paymentData
-     * @return array
+     * @param int $vehicleId
+     * @param int $stationId
+     * @return bool
+     */
+    private function hasVehiclePaidToday(int $vehicleId, int $stationId): bool
+    {
+        return VehiclePassage::where('vehicle_id', $vehicleId)
+            ->where('entry_station_id', $stationId)
+            ->whereDate('entry_time', today())
+            ->where('is_paid', true)
+            ->where('total_amount', '>', 0) // Exclude free re-entries
+            ->exists();
+    }
+
+    /**
+     * Confirm payment (legacy support)
      */
     public function confirmPayment(int $passageId, int $operatorId, array $paymentData = []): array
     {
-        try {
-            DB::beginTransaction();
-
-            $passage = VehiclePassage::findOrFail($passageId);
-
-            if ($passage->exit_time) {
-                return [
-                    'success' => false,
-                    'message' => 'Passage already completed',
-                    'gate_action' => 'deny'
-                ];
-            }
-
-            // Process payment and generate receipt
-            $receipt = $this->processPayment($passage, $operatorId, $paymentData);
-
-            Log::info('Payment confirmed for vehicle exit', [
-                'passage_id' => $passageId,
-                'receipt_id' => $receipt->id,
-                'amount' => $passage->total_amount,
-                'operator_id' => $operatorId
-            ]);
-
-            DB::commit();
-
-            return [
-                'success' => true,
-                'message' => 'Payment confirmed, gate will open',
-                'gate_action' => 'open',
-                'data' => [
-                    'passage_id' => $passage->id,
-                    'receipt' => $receipt
-                ]
-            ];
-
-        } catch (Exception $e) {
-            DB::rollBack();
-            Log::error('Error confirming payment', [
-                'passage_id' => $passageId,
-                'error' => $e->getMessage()
-            ]);
-
-            return [
-                'success' => false,
-                'message' => 'Error confirming payment: ' . $e->getMessage(),
-                'gate_action' => 'deny'
-            ];
-        }
+        return $this->confirmEntryPayment($passageId, $operatorId, $paymentData);
     }
 
     /**
      * Find or create vehicle by plate number
-     *
-     * @param string $plateNumber
-     * @param array $additionalData
-     * @return Vehicle
      */
     private function findOrCreateVehicle(string $plateNumber, array $additionalData = []): Vehicle
     {
         $vehicle = Vehicle::where('plate_number', $plateNumber)->first();
 
         if (!$vehicle) {
-            // Require body_type_id for new vehicles
             if (!isset($additionalData['body_type_id'])) {
                 throw new Exception('Body type ID is required for new vehicles');
             }
@@ -360,11 +412,7 @@ class TollService
     }
 
     /**
-     * Get body type price for station
-     *
-     * @param int $bodyTypeId
-     * @param int $stationId
-     * @return VehicleBodyTypePrice|null
+     * Get body type price for station (DAILY RATE)
      */
     private function getBodyTypePrice(int $bodyTypeId, int $stationId): ?VehicleBodyTypePrice
     {
@@ -376,26 +424,18 @@ class TollService
 
     /**
      * Process payment and generate receipt
-     *
-     * @param VehiclePassage $passage
-     * @param int $operatorId
-     * @param array $paymentData
-     * @return Receipt
      */
     private function processPayment(VehiclePassage $passage, int $operatorId, array $paymentData = []): Receipt
     {
         $paymentMethod = $paymentData['payment_method'] ?? 'cash';
         $paymentAmount = $paymentData['payment_amount'] ?? $passage->total_amount;
 
-        // Validate payment amount
         if ($paymentAmount < $passage->total_amount) {
             throw new Exception('Payment amount is insufficient');
         }
 
-        // Get cash payment type
         $paymentType = PaymentType::where('name', 'Cash')->first();
 
-        // Create receipt
         $receipt = Receipt::create([
             'vehicle_passage_id' => $passage->id,
             'amount' => $paymentAmount,
@@ -403,7 +443,7 @@ class TollService
             'payment_type_id' => $paymentType->id,
             'issued_by' => $operatorId,
             'issued_at' => now(),
-            'notes' => $paymentData['receipt_notes'] ?? null,
+            'notes' => $paymentData['receipt_notes'] ?? 'Daily parking fee',
         ]);
 
         return $receipt;
@@ -411,8 +451,6 @@ class TollService
 
     /**
      * Get active passages for monitoring
-     *
-     * @return array
      */
     public function getActivePassages(): array
     {
@@ -430,9 +468,6 @@ class TollService
 
     /**
      * Get passage details by ID
-     *
-     * @param int $passageId
-     * @return array
      */
     public function getPassageDetails(int $passageId): array
     {
@@ -453,45 +488,31 @@ class TollService
     }
 
     /**
-     * Calculate total billable hours based on parking time and smart charging rules.
-     *
-     * ⚖️ Charging Rules:
-     * - Minimum charge — always 1 hour (TSh 2,000)
-     *   Even if someone parks for 5 minutes or 30 minutes, they must pay for 1 hour.
-     * - Up to 1 hour 30 minutes → Still charge only 1 hour (TSh 2,000)
-     *   Small "grace period" makes customers feel treated fairly.
-     * - From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours (TSh 4,000)
-     * - More than 2 hours → Round up to the next full hour
-     *   After 2 hours, charge by each full hour — always rounding up.
-     *
-     * Examples:
-     *  - 07:00 to 07:30 → 0.5 hours → charge 1 hour (TSh 2,000)
-     *  - 07:00 to 08:20 → 1.33 hours → charge 1 hour (TSh 2,000)
-     *  - 07:00 to 08:40 → 1.66 hours → charge 2 hours (TSh 4,000)
-     *  - 07:00 to 09:10 → 2.16 hours → charge 3 hours (TSh 6,000)
-     *  - 07:00 to 10:05 → 3.08 hours → charge 4 hours (TSh 8,000)
-     *
-     * @param float $hoursSpent  Actual number of hours spent (e.g., 1.25 = 1h15m)
-     * @return int  Billable hours to charge
+     * Get today's revenue summary
      */
-    private function calculateHoursToCharge(float $hoursSpent): int
+    public function getTodayRevenue(int $stationId = null): array
     {
-        // Minimum charge — always 1 hour
-        if ($hoursSpent <= 0) {
-            return 1;
+        $query = VehiclePassage::whereDate('entry_time', today())
+            ->where('is_paid', true);
+
+        if ($stationId) {
+            $query->where('entry_station_id', $stationId);
         }
 
-        // Up to 1 hour 30 minutes → Still charge only 1 hour
-        if ($hoursSpent <= 1.5) {
-            return 1;
-        }
+        $totalRevenue = $query->sum('total_amount');
+        $paidEntries = $query->count();
+        $freeReentries = VehiclePassage::whereDate('entry_time', today())
+            ->where('passage_type', 'reentry')
+            ->count();
 
-        // From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
-        if ($hoursSpent < 2.0) {
-            return 2;
-        }
-
-        // More than 2 hours → Round up to the next full hour
-        return (int) ceil($hoursSpent);
+        return [
+            'success' => true,
+            'data' => [
+                'total_revenue' => $totalRevenue,
+                'paid_entries' => $paidEntries,
+                'free_reentries' => $freeReentries,
+                'date' => today()->toDateString()
+            ]
+        ];
     }
 }

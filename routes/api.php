@@ -307,4 +307,41 @@ Route::prefix('toll-v1')->group(function () {
             'service' => 'Smart Parking API'
         ]);
     });
+
+    // Debug endpoint to check system status
+    Route::get('/debug/status', function () {
+        try {
+            $dbConnection = config('database.default');
+            $dbPath = config('database.connections.sqlite.database');
+            $appKey = config('app.key') ? 'Set (' . strlen(config('app.key')) . ' chars)' : 'NOT SET!';
+            
+            // Try to count records
+            $stationCount = \App\Models\Station::count();
+            $gateCount = \App\Models\Gate::count();
+            $userCount = \App\Models\User::count();
+            $gateDeviceCount = \App\Models\GateDevice::count();
+            
+            return response()->json([
+                'status' => 'ok',
+                'app_key' => $appKey,
+                'db_connection' => $dbConnection,
+                'db_path' => $dbPath,
+                'db_exists' => $dbConnection === 'sqlite' ? file_exists($dbPath) : 'N/A',
+                'counts' => [
+                    'stations' => $stationCount,
+                    'gates' => $gateCount,
+                    'users' => $userCount,
+                    'gate_devices' => $gateDeviceCount,
+                ],
+                'timestamp' => now(),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ], 500);
+        }
+    });
 });

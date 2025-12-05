@@ -29,6 +29,8 @@ class VehiclePassage extends Model
         'base_amount',
         'discount_amount',
         'total_amount',
+        'is_paid',
+        'paid_at',
         'passage_type',
         'is_exempted',
         'exemption_reason',
@@ -40,11 +42,13 @@ class VehiclePassage extends Model
     protected $casts = [
         'entry_time' => 'datetime',
         'exit_time' => 'datetime',
+        'paid_at' => 'datetime',
         'base_amount' => 'decimal:2',
         'discount_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
         'passage_type' => 'string',
         'is_exempted' => 'boolean',
+        'is_paid' => 'boolean',
         'status' => 'string',
         'duration_minutes' => 'integer',
     ];
@@ -291,6 +295,26 @@ class VehiclePassage extends Model
     public function isToll()
     {
         return $this->passage_type === 'toll';
+    }
+
+    /**
+     * Check if the passage is paid.
+     *
+     * @return bool
+     */
+    public function isPaid()
+    {
+        return $this->is_paid;
+    }
+
+    /**
+     * Check if the passage is a same-day re-entry (free).
+     *
+     * @return bool
+     */
+    public function isReentry()
+    {
+        return $this->passage_type === 'reentry';
     }
 
     /**
