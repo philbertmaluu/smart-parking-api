@@ -624,7 +624,19 @@ class CameraDetectionController extends BaseController
                     'plate_number' => $plateNumber,
                 ]);
             } else {
-                // Vehicle already exists - update status if needed and proceed with processing
+                // Vehicle already exists - update body_type_id if not set or if provided body type is different
+                $newBodyTypeId = $request->input('body_type_id');
+                if (!$vehicle->body_type_id || $vehicle->body_type_id != $newBodyTypeId) {
+                    $vehicle->body_type_id = $newBodyTypeId;
+                    $vehicle->save();
+                    Log::info('Updated vehicle body type', [
+                        'detection_id' => $detection->id,
+                        'vehicle_id' => $vehicle->id,
+                        'plate_number' => $plateNumber,
+                        'new_body_type_id' => $newBodyTypeId,
+                    ]);
+                }
+                
                 Log::info('Vehicle already exists, processing detection', [
                     'detection_id' => $detection->id,
                     'vehicle_id' => $vehicle->id,
