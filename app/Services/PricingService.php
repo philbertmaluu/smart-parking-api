@@ -129,6 +129,25 @@ class PricingService
      */
     private function calculateCashPricing(Vehicle $vehicle, Station $station): array
     {
+        // Check if vehicle has body_type_id
+        if (!$vehicle->body_type_id) {
+            Log::info('Vehicle has no body type - will be set during exit', [
+                'vehicle_id' => $vehicle->id,
+                'station_id' => $station->id
+            ]);
+
+            return [
+                'amount' => 0,
+                'payment_type' => 'Cash',
+                'payment_type_id' => PaymentType::where('name', 'Cash')->first()->id,
+                'requires_payment' => false,
+                'description' => 'Vehicle type to be determined at exit',
+                'base_amount' => 0,
+                'discount_amount' => 0,
+                'total_amount' => 0,
+            ];
+        }
+
         // Get base price from VehicleBodyTypePrice
         $basePrice = $this->getBasePrice($vehicle->body_type_id, $station->id);
 

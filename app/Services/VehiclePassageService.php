@@ -105,11 +105,9 @@ class VehiclePassageService
 
             $passage = $this->passageRepository->createPassageEntry($passageData);
 
-            // Handle payment and receipt generation
+            // NOTE: Payment and receipt generation happens at EXIT, not ENTRY
+            // Vehicles enter without payment, and payment is collected at exit
             $receipt = null;
-            if ($passage->total_amount > 0 && $passage->passage_type === 'toll') {
-                $receipt = $this->processPaymentAndGenerateReceipt($passage, $additionalData, $operatorId);
-            }
 
             // Determine gate action
             $gateAction = $this->determineGateAction($passage, $pricing);
@@ -200,6 +198,53 @@ class VehiclePassageService
             ];
 
             $passage = $this->passageRepository->completePassageExit($activePassage->id, $exitData);
+
+            // Generate receipt ONLY if payment was made (toll passage with amount > 0)
+            // If total_amount is 0, it means free re-entry within 24 hours
+            $receipt = null;
+            if ($passage->total_amount > 0 && $passage->passage_type === 'toll') {
+                // Default payment method to 'cash' if not provided
+                $paymentData = [
+                    'payment_method' => $additionalData['payment_method'] ?? 'cash',
+                    'issued_by' => $operatorId,
+                    'issued_at' => now(),
+                    'notes' => $additionalData['receipt_notes'] ?? null,
+                ];
+                
+                try {
+                    $receipt = $this->receiptRepository->createReceiptForPassage($passage, $paymentData);
+                    Log::info('Receipt generated for vehicle exit', [
+                        'passage_id' => $passage->id,
+                        'receipt_id' => $receipt->id,
+                        'amount' => $receipt->amount
+                    ]);
+                    
+                    // Set paid_until for 24-hour free re-entry window
+                    // After paying, vehicle can re-enter within 24 hours without additional charge
+                    $vehicle->update([
+                        'paid_until' => now()->addHours(24)
+                    ]);
+                    Log::info('Vehicle paid_until updated for 24-hour free re-entry', [
+                        'vehicle_id' => $vehicle->id,
+                        'paid_until' => $vehicle->paid_until
+                    ]);
+                } catch (Exception $receiptError) {
+                    Log::error('Failed to generate receipt for exit', [
+                        'passage_id' => $passage->id,
+                        'error' => $receiptError->getMessage()
+                    ]);
+                    // Don't fail the exit if receipt generation fails
+                }
+            } else {
+                Log::info('No receipt generated - free re-entry within 24 hours', [
+                    'passage_id' => $passage->id,
+                    'vehicle_id' => $vehicle->id,
+                    'total_amount' => $passage->total_amount
+                ]);
+            }
+
+            // Reload passage with receipts
+            $passage->load('receipts');
 
             // Determine gate action based on payment status
             $gateAction = $this->determineExitGateAction($passage, $additionalData);
@@ -304,9 +349,10 @@ class VehiclePassageService
 
         if (!$vehicle) {
             // Create new vehicle if not found
+            // body_type_id is optional - can be set later during exit
             $vehicleData = [
                 'plate_number' => $plateNumber,
-                'body_type_id' => $additionalData['body_type_id'] ?? 1, // Default body type
+                'body_type_id' => $additionalData['body_type_id'] ?? null, // Optional - can be set later
                 'make' => $additionalData['make'] ?? null,
                 'model' => $additionalData['model'] ?? null,
                 'year' => $additionalData['year'] ?? null,
@@ -316,6 +362,23 @@ class VehiclePassageService
             ];
 
             $vehicle = $this->vehicleRepository->createVehicle($vehicleData);
+            
+            Log::info('New vehicle created during entry', [
+                'plate_number' => $plateNumber,
+                'vehicle_id' => $vehicle->id,
+                'body_type_id' => $vehicle->body_type_id
+            ]);
+        } else {
+            // Update body_type_id if provided and vehicle doesn't have one
+            if (isset($additionalData['body_type_id']) && !$vehicle->body_type_id) {
+                $vehicle->update(['body_type_id' => $additionalData['body_type_id']]);
+                $vehicle->refresh();
+                
+                Log::info('Vehicle body type updated', [
+                    'vehicle_id' => $vehicle->id,
+                    'body_type_id' => $vehicle->body_type_id
+                ]);
+            }
         }
 
         return $vehicle;

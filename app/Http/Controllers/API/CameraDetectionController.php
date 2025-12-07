@@ -647,7 +647,7 @@ class CameraDetectionController extends BaseController
     {
         try {
             $request->validate([
-                'body_type_id' => 'required|integer|exists:vehicle_body_types,id',
+                'body_type_id' => 'nullable|integer|exists:vehicle_body_types,id',
             ]);
 
             $detection = $this->repository->findById($id);
@@ -665,16 +665,14 @@ class CameraDetectionController extends BaseController
             // Check if vehicle already exists
             $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
             
+            // Body type is optional - can be set later at exit
+            $bodyTypeId = $request->input('body_type_id', null);
+            
             if (!$vehicle) {
-                // Check status before creating vehicle
-                if ($detection->processing_status !== 'pending_vehicle_type') {
-                    return $this->sendError('Detection is not pending vehicle type selection', [], 400);
-                }
-
-                // Create vehicle with provided body type
+                // Create vehicle with optional body type
                 $vehicleData = [
                     'plate_number' => $plateNumber,
-                    'body_type_id' => $request->input('body_type_id'),
+                    'body_type_id' => $bodyTypeId, // Optional - can be null
                     'make' => $detection->make_str,
                     'model' => $detection->model_str,
                     'color' => $detection->color_str,
@@ -682,13 +680,19 @@ class CameraDetectionController extends BaseController
                 ];
 
                 $vehicle = $this->vehicleRepository->createVehicle($vehicleData);
-                Log::info('Vehicle created from pending detection', [
+                Log::info('Vehicle created from detection - LPR only', [
                     'detection_id' => $detection->id,
                     'vehicle_id' => $vehicle->id,
                     'plate_number' => $plateNumber,
+                    'body_type_id' => $bodyTypeId,
                 ]);
             } else {
-                // Vehicle already exists - update status if needed and proceed with processing
+                // Vehicle already exists - update body_type if provided and vehicle doesn't have one
+                if ($bodyTypeId && !$vehicle->body_type_id) {
+                    $vehicle->update(['body_type_id' => $bodyTypeId]);
+                    $vehicle->refresh();
+                }
+                
                 Log::info('Vehicle already exists, processing detection', [
                     'detection_id' => $detection->id,
                     'vehicle_id' => $vehicle->id,

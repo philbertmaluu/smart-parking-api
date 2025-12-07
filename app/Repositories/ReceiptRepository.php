@@ -7,6 +7,7 @@ use App\Models\VehiclePassage;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class ReceiptRepository
 {
@@ -260,5 +261,47 @@ class ReceiptRepository
     public function getTotalRevenue(string $startDate, string $endDate): float
     {
         return $this->model->whereBetween('issued_at', [$startDate, $endDate])->sum('amount');
+    }
+
+    /**
+     * Get receipts for a vehicle within a 24-hour rolling period from entry time
+     *
+     * @param int $vehicleId
+     * @param Carbon $entryTime
+     * @return Collection
+     */
+    public function getReceiptsForVehicleInPeriod(int $vehicleId, Carbon $entryTime): Collection
+    {
+        // Look back 24h from the current entry to avoid double-charging re-entries
+        $periodStart = $entryTime->copy()->subHours(24);
+        $periodEnd = $entryTime->copy()->addHours(24);
+
+        return $this->model->whereHas('vehiclePassage', function ($query) use ($vehicleId, $periodStart, $periodEnd) {
+            $query->where('vehicle_id', $vehicleId)
+                  ->whereBetween('entry_time', [$periodStart, $periodEnd]);
+        })
+        ->whereBetween('issued_at', [$periodStart, $periodEnd])
+        ->get();
+    }
+
+    /**
+     * Check if vehicle has valid receipt for a passage within 24-hour period
+     *
+     * @param int $vehicleId
+     * @param Carbon $entryTime
+     * @param int|null $excludePassageId  Optional passage ID to exclude from check
+     * @return bool
+     */
+    public function hasValidReceiptInPeriod(int $vehicleId, Carbon $entryTime, ?int $excludePassageId = null): bool
+    {
+        $receipts = $this->getReceiptsForVehicleInPeriod($vehicleId, $entryTime);
+
+        if ($excludePassageId) {
+            $receipts = $receipts->filter(function ($receipt) use ($excludePassageId) {
+                return $receipt->vehicle_passage_id !== $excludePassageId;
+            });
+        }
+
+        return $receipts->isNotEmpty();
     }
 }

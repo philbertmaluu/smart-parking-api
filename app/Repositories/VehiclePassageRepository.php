@@ -140,59 +140,76 @@ class VehiclePassageRepository
         // Calculate duration
         $data['duration_minutes'] = $passage->entry_time->diffInMinutes($data['exit_time']);
 
-        // Calculate total amount based on duration (hours spent)
+        // Check if vehicle has paid within the last 24 hours
+        // If yes, they get free re-entry (no charge)
+        $hasRecentReceipt = false;
+        $recentReceiptAmount = 0;
+        $vehicle = $passage->vehicle;
+        if ($vehicle) {
+            // Check for receipts from other passages of the same vehicle within 24 hours
+            $recentReceipt = \App\Models\Receipt::whereHas('vehiclePassage', function ($query) use ($vehicle, $passage) {
+                $query->where('vehicle_id', $vehicle->id)
+                      ->where('id', '!=', $passage->id); // Exclude current passage
+            })
+            ->where('issued_at', '>=', now()->subHours(24))
+            ->orderBy('issued_at', 'desc')
+            ->first();
+            
+            if ($recentReceipt) {
+                $hasRecentReceipt = true;
+                $recentReceiptAmount = $recentReceipt->amount;
+            }
+        }
+
+        // Calculate what the charge WOULD BE (for display purposes)
         $entryTime = $passage->entry_time;
         $exitTime = $data['exit_time'];
-        $hoursSpent = $entryTime->diffInHours($exitTime, true);
-        
-        // Calculate hours to charge based on smart charging rules:
-        // - Minimum charge: 1 hour
-        // - Up to 1.5 hours: charge 1 hour
-        // - From 1.5 to 2 hours: charge 2 hours
-        // - More than 2 hours: round up to next full hour
-        $hoursToCharge = $this->calculateHoursToCharge($hoursSpent);
-        
-        // Calculate total amount: base_amount * hours_to_charge
-        $data['total_amount'] = $passage->base_amount * $hoursToCharge;
+        $daysToCharge = $this->calculateDaysToCharge($entryTime, $exitTime);
+        $calculatedAmount = $passage->base_amount * $daysToCharge;
+
+        // If they have paid within 24 hours, actual charge is 0 (free re-entry)
+        // But we store the calculated amount in notes for reference
+        if ($hasRecentReceipt) {
+            $data['total_amount'] = 0;
+            $data['notes'] = ($passage->notes ?? '') . " [Free re-entry - paid {$recentReceiptAmount} TSh within 24h]";
+        } else {
+            $data['total_amount'] = $calculatedAmount;
+        }
 
         $passage->update($data);
         return $passage->fresh();
     }
 
     /**
-     * Calculate total billable hours based on parking time and smart charging rules.
+     * Calculate total billable days based on parking time using rolling 24-hour periods.
      *
      * Charging Rules:
-     * - Minimum charge — always 1 hour
-     *   Even if someone parks for 5 minutes or 30 minutes, they must pay for 1 hour.
-     * - Up to 1 hour 30 minutes → Still charge only 1 hour
-     *   Small "grace period" makes customers feel treated fairly.
-     * - From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
-     * - More than 2 hours → Round up to the next full hour
-     *   After 2 hours, charge by each full hour — always rounding up.
+     * - Minimum charge: 1 day (even if parked < 24 hours)
+     * - Multiple days: charge for each full 24-hour period
+     * - Round up: partial days are rounded up to next full day
      *
-     * @param float $hoursSpent  Actual number of hours spent (e.g., 1.25 = 1h15m)
-     * @return int  Billable hours to charge
+     * @param \Carbon\Carbon $entryTime
+     * @param \Carbon\Carbon $exitTime
+     * @return int  Billable days to charge
      */
-    private function calculateHoursToCharge(float $hoursSpent): int
+    private function calculateDaysToCharge(\Carbon\Carbon $entryTime, \Carbon\Carbon $exitTime): int
     {
-        // Minimum charge — always 1 hour
+        $hoursSpent = $entryTime->diffInHours($exitTime, true);
+        
+        // Minimum charge — always 1 day
         if ($hoursSpent <= 0) {
             return 1;
         }
 
-        // Up to 1 hour 30 minutes → Still charge only 1 hour
-        if ($hoursSpent <= 1.5) {
+        // If parked less than 24 hours, charge 1 day
+        if ($hoursSpent < 24) {
             return 1;
         }
 
-        // From 1 hour 31 minutes up to 2 hours → Charge double = 2 hours
-        if ($hoursSpent < 2.0) {
-            return 2;
-        }
-
-        // More than 2 hours → Round up to the next full hour
-        return (int) ceil($hoursSpent);
+        // If parked 24 hours or more, calculate number of full 24-hour periods
+        // Round up to next full day if there's any partial day
+        $daysSpent = $hoursSpent / 24;
+        return (int) ceil($daysSpent);
     }
 
     /**

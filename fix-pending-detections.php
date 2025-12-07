@@ -111,3 +111,4 @@ echo "Remaining pending: " . CameraDetectionLog::where('processing_status', 'pen
 
 
 
+
