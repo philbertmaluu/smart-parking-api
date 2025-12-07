@@ -209,6 +209,8 @@ Route::prefix('toll-v1')->group(function () {
         Route::get('vehicle-passages/statistics', [VehiclePassageController::class, 'getStatistics']);
         Route::get('vehicle-passages/dashboard-summary', [VehiclePassageController::class, 'getDashboardSummary']);
         Route::put('vehicle-passages/{id}/status', [VehiclePassageController::class, 'updateStatus']);
+        Route::get('vehicle-passages/{id}/preview-exit', [VehiclePassageController::class, 'previewExit']);
+        Route::patch('vehicle-passages/{id}/set-vehicle-type', [VehiclePassageController::class, 'setVehicleType']);
         Route::get('vehicle-passages/search', [VehiclePassageController::class, 'search']);
 
 

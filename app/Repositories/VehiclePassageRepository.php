@@ -14,6 +14,7 @@ use App\Services\PricingService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class VehiclePassageRepository
@@ -140,44 +141,220 @@ class VehiclePassageRepository
         // Calculate duration
         $data['duration_minutes'] = $passage->entry_time->diffInMinutes($data['exit_time']);
 
-        // Check if vehicle has paid within the last 24 hours
-        // If yes, they get free re-entry (no charge)
-        $hasRecentReceipt = false;
-        $recentReceiptAmount = 0;
         $vehicle = $passage->vehicle;
-        if ($vehicle) {
-            // Check for receipts from other passages of the same vehicle within 24 hours
-            $recentReceipt = \App\Models\Receipt::whereHas('vehiclePassage', function ($query) use ($vehicle, $passage) {
-                $query->where('vehicle_id', $vehicle->id)
-                      ->where('id', '!=', $passage->id); // Exclude current passage
-            })
-            ->where('issued_at', '>=', now()->subHours(24))
-            ->orderBy('issued_at', 'desc')
-            ->first();
-            
-            if ($recentReceipt) {
-                $hasRecentReceipt = true;
-                $recentReceiptAmount = $recentReceipt->amount;
+        
+        // Before calculating, ensure base_amount is up to date with vehicle's current body type
+        // This handles cases where vehicle type was added after entry
+        if ($vehicle && $vehicle->body_type_id && $passage->base_amount == 0) {
+            // Vehicle type was added after entry, update base_amount
+            // Use current effective price for that body type (station-agnostic fallback)
+            $bodyTypePrice = \App\Models\VehicleBodyTypePrice::where('body_type_id', $vehicle->body_type_id)
+                ->where('is_active', true)
+                ->orderBy('effective_from', 'desc')
+                ->first();
+
+            if ($bodyTypePrice) {
+                $passage->base_amount = $bodyTypePrice->base_price;
+                Log::info('Updated passage base_amount from vehicle body type', [
+                    'passage_id' => $passage->id,
+                    'vehicle_id' => $vehicle->id,
+                    'body_type_id' => $vehicle->body_type_id,
+                    'base_amount' => $passage->base_amount
+                ]);
             }
         }
 
-        // Calculate what the charge WOULD BE (for display purposes)
-        $entryTime = $passage->entry_time;
-        $exitTime = $data['exit_time'];
-        $daysToCharge = $this->calculateDaysToCharge($entryTime, $exitTime);
-        $calculatedAmount = $passage->base_amount * $daysToCharge;
+        // Use centralized calculation to determine billing
+        $calculation = $this->calculateExitAmount($passageId, $data['exit_time']);
 
-        // If they have paid within 24 hours, actual charge is 0 (free re-entry)
-        // But we store the calculated amount in notes for reference
-        if ($hasRecentReceipt) {
+        if ($calculation['is_free_reentry']) {
             $data['total_amount'] = 0;
-            $data['notes'] = ($passage->notes ?? '') . " [Free re-entry - paid {$recentReceiptAmount} TSh within 24h]";
+            $data['passage_type'] = 'free';
+            $data['notes'] = ($passage->notes ?? '') . " [Free re-entry within paid window or 24h cycle]";
+            Log::info('Free re-entry (centralized)', [
+                'passage_id' => $passage->id,
+                'vehicle_id' => $vehicle?->id,
+                'first_entry_time' => $calculation['first_entry_time'] ?? null,
+                'exit_time' => $data['exit_time']
+            ]);
         } else {
-            $data['total_amount'] = $calculatedAmount;
+            $data['total_amount'] = $calculation['amount'];
+            Log::info('Charging exit (centralized)', [
+                'passage_id' => $passage->id,
+                'vehicle_id' => $vehicle?->id,
+                'first_entry_time' => $calculation['first_entry_time'] ?? null,
+                'exit_time' => $data['exit_time'],
+                'days_to_charge' => $calculation['days'],
+                'amount' => $calculation['amount']
+            ]);
         }
 
         $passage->update($data);
         return $passage->fresh();
+    }
+
+    /**
+     * Calculate an exit preview for a given passage (without persisting changes).
+     *
+     * @param int $passageId
+     * @param \Carbon\Carbon|null $referenceTime
+     * @return array|null
+     */
+    public function calculateExitPreview(int $passageId, $referenceTime = null): ?array
+    {
+        $calculation = $this->calculateExitAmount($passageId, $referenceTime);
+        if (is_null($calculation)) {
+            return null;
+        }
+
+        return [
+            'passage_id' => $calculation['passage_id'],
+            'vehicle_id' => $calculation['vehicle_id'],
+            'base_amount' => (float) $calculation['base_amount'],
+            'days' => $calculation['days'],
+            'amount' => (float) $calculation['amount'],
+            'first_entry_time' => $calculation['first_entry_time'] ?? null,
+            'is_free_reentry' => $calculation['is_free_reentry'],
+        ];
+    }
+
+    /**
+     * Centralized calculation for exit amount. Uses vehicle.paid_until when present.
+     * Returns array with keys: passage_id, vehicle_id, base_amount, days, amount, first_entry_time, is_free_reentry
+     */
+    public function calculateExitAmount(int $passageId, $referenceTime = null): ?array
+    {
+        $passage = $this->model->with('vehicle')->find($passageId);
+        if (!$passage) {
+            return null;
+        }
+
+        $now = $referenceTime ? (\Carbon\Carbon::parse($referenceTime)) : now();
+        $vehicle = $passage->vehicle;
+
+        // Ensure base_amount
+        $baseAmount = $passage->base_amount;
+        if ($vehicle && $vehicle->body_type_id && $baseAmount == 0) {
+            $bodyTypePrice = VehicleBodyTypePrice::where('body_type_id', $vehicle->body_type_id)
+                ->where('is_active', true)
+                ->orderBy('effective_from', 'desc')
+                ->first();
+
+            if ($bodyTypePrice) {
+                $baseAmount = $bodyTypePrice->base_price;
+            }
+        }
+
+        // If vehicle has an active paid window that covers now, it's a free re-entry
+        if ($vehicle && $vehicle->paid_until && $vehicle->paid_until->greaterThanOrEqualTo($now)) {
+            return [
+                'passage_id' => $passage->id,
+                'vehicle_id' => $vehicle->id,
+                'base_amount' => $baseAmount,
+                'days' => 0,
+                'amount' => 0,
+                'first_entry_time' => $vehicle->paid_until,
+                'is_free_reentry' => true,
+            ];
+        }
+
+        // Find the FIRST ENTRY within the last 24 hours for this vehicle
+        $firstEntryIn24h = null;
+        if ($vehicle) {
+            $firstEntryIn24h = VehiclePassage::where('vehicle_id', $vehicle->id)
+                ->where('entry_time', '>=', now()->subHours(24))
+                ->orderBy('entry_time', 'asc')
+                ->first();
+        }
+
+        if (!$firstEntryIn24h) {
+            $firstEntryIn24h = $passage;
+        }
+
+        // Check if there has been an exit since the first entry (within this 24h window)
+        $hasExitedSinceFirstEntry = false;
+        if ($vehicle) {
+            $hasExitedSinceFirstEntry = VehiclePassage::where('vehicle_id', $vehicle->id)
+                ->where('id', '!=', $passage->id)
+                ->whereNotNull('exit_time')
+                ->where('entry_time', '>=', $firstEntryIn24h->entry_time)
+                ->exists();
+        }
+
+        if ($hasExitedSinceFirstEntry) {
+            return [
+                'passage_id' => $passage->id,
+                'vehicle_id' => $vehicle?->id,
+                'base_amount' => $baseAmount,
+                'days' => 0,
+                'amount' => 0,
+                'first_entry_time' => $firstEntryIn24h->entry_time,
+                'is_free_reentry' => true,
+            ];
+        }
+
+        // Determine charge start time (if paid_until exists and is after first entry, start counting from paid_until)
+        $chargeStart = $firstEntryIn24h->entry_time;
+        if ($vehicle && $vehicle->paid_until && $vehicle->paid_until->greaterThan($chargeStart)) {
+            $chargeStart = $vehicle->paid_until;
+        }
+
+        $hoursSpent = $chargeStart->diffInHours($now, true);
+        $daysToCharge = 1;
+        if ($hoursSpent >= 24) {
+            $daysToCharge = (int) ceil($hoursSpent / 24);
+        }
+
+        $calculatedAmount = $baseAmount * $daysToCharge;
+
+        return [
+            'passage_id' => $passage->id,
+            'vehicle_id' => $vehicle?->id,
+            'base_amount' => $baseAmount,
+            'days' => $daysToCharge,
+            'amount' => $calculatedAmount,
+            'first_entry_time' => $firstEntryIn24h->entry_time,
+            'is_free_reentry' => false,
+        ];
+    }
+
+    /**
+     * Calculate exit amount based on provided data (useful for tests or preview without a passage record).
+     * Parameters: vehicleId, baseAmount, entryTime, referenceTime
+     */
+    public function calculateExitAmountForData(int $vehicleId, float $baseAmount, $entryTime, $referenceTime = null): array
+    {
+        $vehicle = \App\Models\Vehicle::find($vehicleId);
+        $now = $referenceTime ? (\Carbon\Carbon::parse($referenceTime)) : now();
+
+        if ($vehicle && $vehicle->paid_until && $vehicle->paid_until->greaterThanOrEqualTo($now)) {
+            return [
+                'vehicle_id' => $vehicle->id,
+                'base_amount' => $baseAmount,
+                'days' => 0,
+                'amount' => 0,
+                'first_entry_time' => $entryTime,
+                'is_free_reentry' => true,
+            ];
+        }
+
+        $entry = \Carbon\Carbon::parse($entryTime);
+        $hoursSpent = $entry->diffInHours($now, true);
+        $daysToCharge = 1;
+        if ($hoursSpent >= 24) {
+            $daysToCharge = (int) ceil($hoursSpent / 24);
+        }
+
+        $calculatedAmount = $baseAmount * $daysToCharge;
+
+        return [
+            'vehicle_id' => $vehicle?->id,
+            'base_amount' => $baseAmount,
+            'days' => $daysToCharge,
+            'amount' => $calculatedAmount,
+            'first_entry_time' => $entry,
+            'is_free_reentry' => false,
+        ];
     }
 
     /**

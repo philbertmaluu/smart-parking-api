@@ -219,15 +219,30 @@ class VehiclePassageService
                         'amount' => $receipt->amount
                     ]);
                     
-                    // Set paid_until for 24-hour free re-entry window
-                    // After paying, vehicle can re-enter within 24 hours without additional charge
-                    $vehicle->update([
-                        'paid_until' => now()->addHours(24)
-                    ]);
-                    Log::info('Vehicle paid_until updated for 24-hour free re-entry', [
-                        'vehicle_id' => $vehicle->id,
-                        'paid_until' => $vehicle->paid_until
-                    ]);
+                    // Set paid_until to FIRST_ENTRY + 24 hours — free window starts from first entry in 24h window
+                    try {
+                        $firstEntryIn24h = \App\Models\VehiclePassage::where('vehicle_id', $vehicle->id)
+                            ->where('entry_time', '>=', now()->subHours(24))
+                            ->orderBy('entry_time', 'asc')
+                            ->first();
+
+                        if ($firstEntryIn24h) {
+                            $paidUntilTime = $firstEntryIn24h->entry_time->copy()->addHours(24);
+                        } else {
+                            $paidUntilTime = now()->copy()->addHours(24);
+                        }
+
+                        $vehicle->update(['paid_until' => $paidUntilTime]);
+                        Log::info('Vehicle paid_until set to 24h from first entry', [
+                            'vehicle_id' => $vehicle->id,
+                            'paid_until' => $paidUntilTime
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to set paid_until on vehicle', [
+                            'vehicle_id' => $vehicle->id,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
                 } catch (Exception $receiptError) {
                     Log::error('Failed to generate receipt for exit', [
                         'passage_id' => $passage->id,

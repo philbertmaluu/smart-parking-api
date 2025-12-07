@@ -21,6 +21,7 @@ class Vehicle extends Model
         'color',
         'owner_name',
         'is_registered',
+        'paid_until',
         'is_exempted',
         'exemption_reason',
         'exemption_expires_at',
@@ -29,6 +30,7 @@ class Vehicle extends Model
     protected $casts = [
         'year' => 'integer',
         'is_registered' => 'boolean',
+        'paid_until' => 'datetime',
         'is_exempted' => 'boolean',
         'exemption_expires_at' => 'datetime',
     ];

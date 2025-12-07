@@ -209,6 +209,65 @@ class VehiclePassageController extends BaseController
     }
 
     /**
+     * Return an exit preview for a passage (calculation only, no persistence)
+     */
+    public function previewExit($id)
+    {
+        try {
+            $preview = $this->passageRepository->calculateExitPreview((int) $id);
+
+            if (is_null($preview)) {
+                return $this->sendError('Vehicle passage not found', [], 404);
+            }
+
+            return $this->sendResponse($preview, 'Exit preview calculated successfully');
+        } catch (\Exception $e) {
+            return $this->sendError('Error calculating exit preview', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Set or update vehicle body type for a passage's vehicle and return updated preview
+     */
+    public function setVehicleType(Request $request, $id)
+    {
+        try {
+            $request->validate([
+                'body_type_id' => 'required|exists:vehicle_body_types,id',
+            ]);
+
+            $passage = $this->passageRepository->getPassageByIdWithRelations((int) $id);
+            if (!$passage) {
+                return $this->sendError('Vehicle passage not found', [], 404);
+            }
+
+            $vehicle = $passage->vehicle;
+            if (!$vehicle) {
+                return $this->sendError('Vehicle not found for passage', [], 404);
+            }
+
+            // Update vehicle body type if changed
+            $vehicle->update(['body_type_id' => $request->body_type_id]);
+
+            // Update passage base_amount immediately using effective price
+            $bodyTypePrice = \App\Models\VehicleBodyTypePrice::where('body_type_id', $request->body_type_id)
+                ->where('is_active', true)
+                ->orderBy('effective_from', 'desc')
+                ->first();
+
+            if ($bodyTypePrice) {
+                $passage->update(['base_amount' => $bodyTypePrice->base_price]);
+            }
+
+            $preview = $this->passageRepository->calculateExitPreview((int) $id);
+
+            return $this->sendResponse($preview, 'Vehicle type updated and preview calculated');
+        } catch (\Exception $e) {
+            return $this->sendError('Error updating vehicle type', $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * Quick plate number lookup for gate control
      */
     public function quickLookup(Request $request)
