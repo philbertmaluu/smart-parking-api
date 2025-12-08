@@ -924,6 +924,28 @@ class CameraController extends BaseController
                     ->header('Access-Control-Allow-Origin', '*');
             }
 
+            // If real-time snapshot failed, try to return the last stored preview for this IP
+            try {
+                $ip = $request->input('ip');
+                if ($ip) {
+                    $device = \App\Models\GateDevice::where('ip_address', $ip)->first();
+                    if ($device && $device->last_preview_path) {
+                        $storagePath = storage_path('app/public/' . $device->last_preview_path);
+                        if (file_exists($storagePath)) {
+                            return response()->file($storagePath, [
+                                'Content-Type' => 'image/jpeg',
+                                'Cache-Control' => 'no-cache, no-store, must-revalidate',
+                                'Pragma' => 'no-cache',
+                                'Expires' => '0',
+                                'X-Preview-Source' => 'stored'
+                            ]);
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // ignore and return original error below
+            }
+
             return $this->sendError('Failed to capture ZKTeco snapshot', $result, 422);
             
         } catch (\Exception $e) {

@@ -24,3 +24,12 @@ Schedule::command('fetch:camera-data')
     ->withoutOverlapping()
     ->runInBackground();
 
+// Schedule periodic camera preview fetch job for devices that support snapshot.
+// Runs every minute; this schedules an Artisan command which dispatches the jobs.
+Schedule::command('camera:dispatch-previews')
+    ->everyMinute()
+    ->timezone('Africa/Dar_es_Salaam')
+    ->name('fetch:camera-previews')
+    ->withoutOverlapping()
+    ->runInBackground();
+
