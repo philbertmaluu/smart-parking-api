@@ -279,9 +279,13 @@ class CameraDetectionService
      */
     private function mapDetectionToLogData(array $detection): array
     {
+        // Prefer gate_id coming from payload (frontend push) and fall back to configured gate
+        $incomingGateId = $detection['gate_id'] ?? $detection['gateId'] ?? null;
+        $resolvedGateId = $incomingGateId ?: $this->gateId;
+
         return [
             'camera_detection_id' => $detection['id'] ?? null,
-            'gate_id' => $this->gateId,
+            'gate_id' => $resolvedGateId,
             'numberplate' => $detection['numberplate'] ?? '',
             'originalplate' => $detection['originalplate'] ?? null,
             'detection_timestamp' => isset($detection['timestamp']) 
