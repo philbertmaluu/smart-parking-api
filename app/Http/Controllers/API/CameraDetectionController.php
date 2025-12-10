@@ -190,9 +190,21 @@ class CameraDetectionController extends BaseController
                 'detections.*' => 'required|array',
             ]);
 
+            // Ensure passage service is available so we can auto-process after storing
+            $this->cameraDetectionService->setPassageService($this->vehiclePassageService);
+
             $result = $this->cameraDetectionService->storeCameraLogs($request->input('detections'));
 
-            return $this->sendResponse($result, 'Camera logs stored successfully');
+            // Auto-process into pending queues (entry/exit) after storing
+            $processResult = $this->cameraDetectionService->processUnprocessedDetections();
+
+            return $this->sendResponse(
+                array_merge($result, [
+                    'processed' => $processResult['processed'] ?? 0,
+                    'processing_errors' => $processResult['errors'] ?? 0,
+                ]),
+                'Camera logs stored and processed successfully'
+            );
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return $this->sendError('Validation error', $e->errors(), 422);
