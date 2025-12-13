@@ -496,6 +496,9 @@ class CameraDetectionController extends BaseController
      */
     public function getPendingVehicleTypeDetections(Request $request)
     {
+        // Set timeout for this request (30 seconds)
+        set_time_limit(30);
+        
         try {
             $detections = $this->repository->getPendingVehicleTypeDetections();
 
@@ -597,6 +600,9 @@ class CameraDetectionController extends BaseController
      */
     public function getPendingExitDetections(Request $request)
     {
+        // Set timeout for this request (30 seconds)
+        set_time_limit(30);
+        
         try {
             $detections = $this->repository->getPendingExitDetections();
 
@@ -738,6 +744,9 @@ class CameraDetectionController extends BaseController
      */
     public function processWithVehicleType(Request $request, int $id)
     {
+        // Set timeout for this request (30 seconds)
+        set_time_limit(30);
+        
         try {
             $request->validate([
                 'body_type_id' => 'nullable|integer|exists:vehicle_body_types,id',
@@ -747,6 +756,19 @@ class CameraDetectionController extends BaseController
 
             if (!$detection) {
                 return $this->sendError('Detection not found', [], 404);
+            }
+
+            // Prevent duplicate processing - check if already processed
+            if ($detection->processed) {
+                Log::warning('Attempted to process already processed detection', [
+                    'detection_id' => $id,
+                    'plate_number' => $detection->numberplate,
+                    'processing_status' => $detection->processing_status,
+                ]);
+                return $this->sendError('Detection already processed', [
+                    'detection_id' => $id,
+                    'status' => $detection->processing_status,
+                ], 400);
             }
 
             // Allow processing if status is pending_vehicle_type OR if vehicle already exists (reprocess)
@@ -797,6 +819,34 @@ class CameraDetectionController extends BaseController
             // Get operator ID
             $operatorId = auth()->id() ?? $this->getSystemOperatorId();
             $gateId = $detection->gate_id;
+
+            // Validate gate_id before processing
+            if (!$gateId) {
+                Log::error('Detection has no gate_id', [
+                    'detection_id' => $detection->id,
+                    'plate_number' => $plateNumber,
+                ]);
+                $detection->markAsFailed('Invalid gate ID - gate_id is null');
+                return $this->sendError('Invalid gate ID. Detection has no gate assigned.', [
+                    'error' => 'Gate ID is required but was not found in detection',
+                    'detection_id' => $detection->id,
+                ], 400);
+            }
+
+            // Validate gate exists
+            $gate = \App\Models\Gate::find($gateId);
+            if (!$gate) {
+                Log::error('Gate not found for detection', [
+                    'detection_id' => $detection->id,
+                    'gate_id' => $gateId,
+                    'plate_number' => $plateNumber,
+                ]);
+                $detection->markAsFailed("Gate not found: {$gateId}");
+                return $this->sendError('Gate not found', [
+                    'error' => "Gate with ID {$gateId} does not exist",
+                    'gate_id' => $gateId,
+                ], 404);
+            }
 
             // Prepare additional data
             // Get default payment method (Cash) for camera detections
@@ -886,11 +936,25 @@ class CameraDetectionController extends BaseController
                 ], 'Detection processed successfully with vehicle type');
             } else {
                 $errorMessage = isset($result['message']) ? $result['message'] : 'Unknown error';
+                
+                // Log detailed error information
+                Log::error('Failed to process detection', [
+                    'detection_id' => $id,
+                    'plate_number' => $plateNumber,
+                    'gate_id' => $gateId,
+                    'operator_id' => $operatorId,
+                    'direction' => $direction,
+                    'error_message' => $errorMessage,
+                    'result' => $result,
+                ]);
+                
                 $detection->markAsFailed("Failed to process: {$errorMessage}");
                 
                 return $this->sendError('Failed to process detection', [
                     'error' => $errorMessage,
                     'result' => $result,
+                    'detection_id' => $id,
+                    'gate_id' => $gateId,
                 ], 500);
             }
 
@@ -916,6 +980,9 @@ class CameraDetectionController extends BaseController
      */
     public function processExitDetection(Request $request, int $id)
     {
+        // Set timeout for this request (30 seconds)
+        set_time_limit(30);
+        
         try {
             $detection = $this->repository->findById($id);
 
@@ -936,6 +1003,34 @@ class CameraDetectionController extends BaseController
             // Get operator ID
             $operatorId = auth()->id() ?? $this->getSystemOperatorId();
             $gateId = $detection->gate_id;
+
+            // Validate gate_id before processing
+            if (!$gateId) {
+                Log::error('Exit detection has no gate_id', [
+                    'detection_id' => $detection->id,
+                    'plate_number' => $plateNumber,
+                ]);
+                $detection->markAsFailed('Invalid gate ID - gate_id is null');
+                return $this->sendError('Invalid gate ID. Detection has no gate assigned.', [
+                    'error' => 'Gate ID is required but was not found in detection',
+                    'detection_id' => $detection->id,
+                ], 400);
+            }
+
+            // Validate gate exists
+            $gate = \App\Models\Gate::find($gateId);
+            if (!$gate) {
+                Log::error('Gate not found for exit detection', [
+                    'detection_id' => $detection->id,
+                    'gate_id' => $gateId,
+                    'plate_number' => $plateNumber,
+                ]);
+                $detection->markAsFailed("Gate not found: {$gateId}");
+                return $this->sendError('Gate not found', [
+                    'error' => "Gate with ID {$gateId} does not exist",
+                    'gate_id' => $gateId,
+                ], 404);
+            }
 
             // Prepare additional data
             $additionalData = [
@@ -978,11 +1073,24 @@ class CameraDetectionController extends BaseController
                 ], 'Exit detection processed successfully');
             } else {
                 $errorMessage = isset($result['message']) ? $result['message'] : 'Unknown error';
+                
+                // Log detailed error information
+                Log::error('Failed to process exit detection', [
+                    'detection_id' => $id,
+                    'plate_number' => $plateNumber,
+                    'gate_id' => $gateId,
+                    'operator_id' => $operatorId,
+                    'error_message' => $errorMessage,
+                    'result' => $result,
+                ]);
+                
                 $detection->markAsFailed("Failed to process exit: {$errorMessage}");
                 
                 return $this->sendError('Failed to process exit detection', [
                     'error' => $errorMessage,
                     'result' => $result,
+                    'detection_id' => $id,
+                    'gate_id' => $gateId,
                 ], 500);
             }
 
