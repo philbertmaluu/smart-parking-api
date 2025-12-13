@@ -280,6 +280,15 @@ class CameraDetectionService
                     }
                 }
 
+                // Fallback dedupe by plate+timestamp+gate when camera_detection_id is missing
+                $incomingGateId = $detection['gate_id'] ?? $detection['gateId'] ?? $this->gateId;
+                $plateNumber = $detection['numberplate'] ?? $detection['originalplate'] ?? null;
+                $timestampValue = $detection['timestamp'] ?? $detection['detection_timestamp'] ?? null;
+                if (!isset($detection['id']) && $this->repository->detectionExistsByComposite($plateNumber, $timestampValue, $incomingGateId)) {
+                    $skipped++;
+                    continue;
+                }
+
                 // Map API response to database fields
                 $logData = $this->mapDetectionToLogData($detection);
 

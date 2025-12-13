@@ -96,6 +96,28 @@ class CameraDetectionLogRepository extends BaseRepository
     }
 
     /**
+     * Fallback duplicate check by plate + timestamp + gate.
+     */
+    public function detectionExistsByComposite(?string $plateNumber, ?string $timestamp, ?int $gateId): bool
+    {
+        if (!$plateNumber || !$timestamp || !$gateId) {
+            return false;
+        }
+
+        try {
+            $ts = \Carbon\Carbon::parse($timestamp);
+        } catch (\Exception $e) {
+            return false;
+        }
+
+        return $this->model
+            ->where('gate_id', $gateId)
+            ->where('numberplate', $plateNumber)
+            ->where('detection_timestamp', $ts)
+            ->exists();
+    }
+
+    /**
      * Get latest detection timestamp.
      *
      * @return \Carbon\Carbon|null
