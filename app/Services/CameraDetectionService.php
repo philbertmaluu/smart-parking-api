@@ -28,11 +28,27 @@ class CameraDetectionService
 
     public function __construct(CameraDetectionLogRepository $repository, VehicleRepository $vehicleRepository)
     {
-        $this->cameraIp = env('CAMERA_IP', '192.168.0.109');
+        // Default to env variables if set, otherwise will be set per-gate
+        $this->cameraIp = env('CAMERA_IP', '192.168.0.107');
         $this->computerId = (int) env('CAMERA_COMPUTER_ID', 1);
         $this->gateId = (int) env('CAMERA_GATE_ID', 1);
         $this->repository = $repository;
         $this->vehicleRepository = $vehicleRepository;
+    }
+
+    /**
+     * Set camera configuration from gate device
+     * 
+     * @param \App\Models\GateDevice $cameraDevice
+     * @return void
+     */
+    public function setCameraFromDevice(\App\Models\GateDevice $cameraDevice): void
+    {
+        $this->cameraIp = $cameraDevice->ip_address;
+        $this->gateId = $cameraDevice->gate_id;
+        // Computer ID is typically 1 for ZKTeco cameras, but can be configured per device if needed
+        // For now, we'll use the device_id or default to 1
+        $this->computerId = (int) ($cameraDevice->device_id ?? env('CAMERA_COMPUTER_ID', 1));
     }
 
     /**
@@ -55,13 +71,14 @@ class CameraDetectionService
     public function fetchCameraLogs(?Carbon $dateTime = null): array
     {
         try {
-            // IMPORTANT: Camera's internal clock appears to be incorrect (showing 2000 dates)
-            // Query from a very old date (2000-01-01) to ensure we get ALL detections
-            // The camera API returns results from the specified date onwards
+            // IMPORTANT: The camera API `jsonlastresults` always returns the last 10 results
+            // regardless of the date parameter. We need to fetch all and filter duplicates.
+            // However, to avoid processing very old detections, we'll use a recent date.
+            // The actual filtering happens in storeCameraLogs() which checks for existing camera_detection_id
             if ($dateTime === null) {
-                // Use a date that's guaranteed to be before any camera detection
-                // Camera seems to use 2000-01-01 as base, so query from there
-                $dateTime = Carbon::parse('2000-01-01 00:00:00');
+                // Fetch from a date that ensures we get recent detections
+                // The camera API will return the last 10 results, and we'll filter duplicates
+                $dateTime = Carbon::now()->subHours(24); // Last 24 hours to catch any recent detections
             }
             
             // Format date as required by API: YYYY-MM-DDTHH:mm:ss.SSS
@@ -79,9 +96,9 @@ class CameraDetectionService
             ]);
 
             // Make HTTP request (no authentication required)
-            // Reduced timeout to 5 seconds for faster response
+            // Increased timeout to 15 seconds to handle slow camera responses
             try {
-                $response = Http::timeout(5)
+                $response = Http::timeout(15)
                     ->get($url);
 
                 if (!$response->successful()) {
@@ -124,12 +141,27 @@ class CameraDetectionService
                 ];
             }
 
-            $data = $response->json();
+            $responseData = $response->json();
+
+            // Camera API can return data in two formats:
+            // 1. Direct array: [{id: 1, ...}, {id: 2, ...}]
+            // 2. Wrapped in data key: {data: [{id: 1, ...}, {id: 2, ...}]}
+            $data = [];
+            if (is_array($responseData)) {
+                if (isset($responseData['data']) && is_array($responseData['data'])) {
+                    // Format 2: wrapped in data key
+                    $data = $responseData['data'];
+                } elseif (isset($responseData[0]) && is_array($responseData[0])) {
+                    // Format 1: direct array
+                    $data = $responseData;
+                }
+            }
 
             // Handle case where API returns empty array or null
-            if (!is_array($data)) {
+            if (empty($data) || !is_array($data)) {
                 Log::warning('Camera API returned invalid data format', [
                     'response' => $response->body(),
+                    'parsed' => $responseData,
                 ]);
 
                 return [
@@ -142,6 +174,7 @@ class CameraDetectionService
 
             Log::info('Camera logs fetched successfully', [
                 'count' => count($data),
+                'sample_ids' => array_slice(array_column($data, 'id'), 0, 5),
             ]);
 
             return [
@@ -180,10 +213,71 @@ class CameraDetectionService
 
         foreach ($detections as $detection) {
             try {
-                // Check if detection already exists (by camera_detection_id)
-                if (isset($detection['id']) && $this->repository->detectionExists($detection['id'])) {
+                // IMPORTANT: Camera reuses detection IDs, so we can't rely on camera_detection_id alone
+                // Check for duplicates using plate number + timestamp combination
+                $plateNumber = trim($detection['numberplate'] ?? '');
+                $detectionTimestamp = isset($detection['timestamp']) 
+                    ? Carbon::parse($detection['timestamp']) 
+                    : null;
+                
+                // Skip if plate number is empty
+                if (empty($plateNumber)) {
                     $skipped++;
+                    Log::debug('Skipping detection with empty plate number', [
+                        'camera_detection_id' => $detection['id'] ?? 'N/A',
+                    ]);
                     continue;
+                }
+                
+                // Check if this exact detection already exists
+                // IMPORTANT: Camera reuses IDs, so we need to check plate + timestamp combination
+                // Also check camera_detection_id if available for additional accuracy
+                $cameraDetectionId = $detection['id'] ?? null;
+                
+                if ($detectionTimestamp) {
+                    // Check for exact match: same plate + same timestamp (within 2 seconds for tighter matching)
+                    // This prevents storing the same detection multiple times
+                    // Also check camera_detection_id if available for additional accuracy
+                    // IMPORTANT: Check ALL detections (processed or not) to prevent duplicates
+                    $exists = CameraDetectionLog::where('numberplate', $plateNumber)
+                        ->where('gate_id', $this->gateId) // Also check gate_id to prevent cross-gate duplicates
+                        ->whereBetween('detection_timestamp', [
+                            $detectionTimestamp->copy()->subSeconds(2),
+                            $detectionTimestamp->copy()->addSeconds(2)
+                        ])
+                        ->when($cameraDetectionId, function($query) use ($cameraDetectionId) {
+                            // If camera_detection_id is available, also check it for more accuracy
+                            // This helps when camera reuses IDs but timestamps are different
+                            return $query->where('camera_detection_id', $cameraDetectionId);
+                        })
+                        ->exists();
+                    
+                    if ($exists) {
+                        $skipped++;
+                        Log::debug('Skipping duplicate detection (plate + timestamp + gate match)', [
+                            'camera_detection_id' => $cameraDetectionId ?? 'N/A',
+                            'plate' => $plateNumber,
+                            'gate_id' => $this->gateId,
+                            'timestamp' => $detectionTimestamp->toDateTimeString(),
+                        ]);
+                        continue;
+                    }
+                } else {
+                    // Fallback: check by camera_detection_id + gate_id if timestamp is missing
+                    if ($cameraDetectionId) {
+                        $exists = CameraDetectionLog::where('camera_detection_id', $cameraDetectionId)
+                            ->where('gate_id', $this->gateId)
+                            ->exists();
+                        if ($exists) {
+                            $skipped++;
+                            Log::debug('Skipping duplicate detection (by camera_detection_id + gate_id - no timestamp)', [
+                                'camera_detection_id' => $cameraDetectionId,
+                                'plate' => $plateNumber,
+                                'gate_id' => $this->gateId,
+                            ]);
+                            continue;
+                        }
+                    }
                 }
 
                 // Map API response to database fields
@@ -192,6 +286,13 @@ class CameraDetectionService
                 // Create log entry
                 $this->repository->createDetectionLog($logData);
                 $stored++;
+                
+                Log::info('✅ Stored NEW camera detection', [
+                    'camera_detection_id' => $detection['id'],
+                    'plate' => $detection['numberplate'] ?? 'N/A',
+                    'gate_id' => $logData['gate_id'],
+                    'timestamp' => $logData['detection_timestamp'],
+                ]);
 
             } catch (Exception $e) {
                 Log::error('Error storing camera detection log', [
@@ -218,12 +319,22 @@ class CameraDetectionService
 
     /**
      * Fetch and store camera logs in one operation
+     * Only processes NEW detections (newer than the last stored detection for this gate)
      *
      * @param Carbon|null $dateTime
      * @return array
      */
     public function fetchAndStoreLogs(?Carbon $dateTime = null): array
     {
+        // Get the last detection timestamp we've seen for this gate
+        // This ensures we only process truly NEW detections
+        $lastTimestamp = $this->repository->getLatestDetectionTimestampForGate($this->gateId);
+        
+        Log::info('Fetching camera logs', [
+            'gate_id' => $this->gateId,
+            'last_timestamp' => $lastTimestamp ? $lastTimestamp->toDateTimeString() : 'none (first run)',
+        ]);
+
         $fetchResult = $this->fetchCameraLogs($dateTime);
 
         if (!$fetchResult['success']) {
@@ -233,7 +344,7 @@ class CameraDetectionService
         if ($fetchResult['count'] === 0) {
             return [
                 'success' => true,
-                'message' => 'No new detections found',
+                'message' => 'No detections found from camera',
                 'fetched' => 0,
                 'stored' => 0,
                 'skipped' => 0,
@@ -241,14 +352,120 @@ class CameraDetectionService
             ];
         }
 
-        $storeResult = $this->storeCameraLogs($fetchResult['data']);
+        // Filter to only NEW detections (newer than last timestamp)
+        $newDetections = [];
+        $skippedOld = 0;
+        
+        foreach ($fetchResult['data'] as $detection) {
+            $detectionTimestamp = isset($detection['timestamp']) 
+                ? Carbon::parse($detection['timestamp']) 
+                : null;
+            
+            // Only include if it's newer than our last seen detection
+            // Also check if this exact detection already exists in database (even if pending)
+            if ($detectionTimestamp) {
+                $plateNumber = trim($detection['numberplate'] ?? '');
+                $cameraDetectionId = $detection['id'] ?? null;
+                
+                // First check: Is it newer than last timestamp?
+                $isNewer = !$lastTimestamp || $detectionTimestamp->gt($lastTimestamp);
+                
+                // Second check: Does this exact detection already exist? (prevent duplicates even if pending)
+                $alreadyExists = false;
+                if (!empty($plateNumber)) {
+                    $alreadyExists = CameraDetectionLog::where('numberplate', $plateNumber)
+                        ->where('gate_id', $this->gateId)
+                        ->whereBetween('detection_timestamp', [
+                            $detectionTimestamp->copy()->subSeconds(2),
+                            $detectionTimestamp->copy()->addSeconds(2)
+                        ])
+                        ->when($cameraDetectionId, function($query) use ($cameraDetectionId) {
+                            return $query->where('camera_detection_id', $cameraDetectionId);
+                        })
+                        ->exists();
+                }
+                
+                if ($isNewer && !$alreadyExists) {
+                    // This is a NEW detection that doesn't exist yet - include it
+                    $newDetections[] = $detection;
+                    Log::debug('✅ NEW detection found', [
+                        'plate' => $plateNumber,
+                        'timestamp' => $detectionTimestamp->toDateTimeString(),
+                        'last_timestamp' => $lastTimestamp ? $lastTimestamp->toDateTimeString() : 'none',
+                    ]);
+                } else {
+                    // This detection is old OR already exists - skip it
+                    $skippedOld++;
+                    $reason = $alreadyExists ? 'already exists in database' : 'older than last processed';
+                    Log::debug("⏭️ Skipping detection ({$reason})", [
+                        'plate' => $plateNumber,
+                        'timestamp' => $detectionTimestamp->toDateTimeString(),
+                        'last_timestamp' => $lastTimestamp ? $lastTimestamp->toDateTimeString() : 'none',
+                        'already_exists' => $alreadyExists,
+                    ]);
+                }
+            } else {
+                // No timestamp - check if it exists by camera_detection_id + gate_id
+                $plateNumber = trim($detection['numberplate'] ?? '');
+                $cameraDetectionId = $detection['id'] ?? null;
+                
+                $alreadyExists = false;
+                if ($cameraDetectionId && !empty($plateNumber)) {
+                    $alreadyExists = CameraDetectionLog::where('camera_detection_id', $cameraDetectionId)
+                        ->where('numberplate', $plateNumber)
+                        ->where('gate_id', $this->gateId)
+                        ->exists();
+                }
+                
+                if (!$alreadyExists) {
+                    // Include it but log a warning - the duplicate check in storeCameraLogs will handle it
+                    $newDetections[] = $detection;
+                    Log::warning('Detection has no timestamp - including for duplicate check', [
+                        'plate' => $plateNumber,
+                        'camera_detection_id' => $cameraDetectionId ?? 'N/A',
+                    ]);
+                } else {
+                    $skippedOld++;
+                    Log::debug('⏭️ Skipping detection without timestamp (already exists)', [
+                        'plate' => $plateNumber,
+                        'camera_detection_id' => $cameraDetectionId ?? 'N/A',
+                    ]);
+                }
+            }
+        }
+
+        if (empty($newDetections)) {
+            Log::info('No new detections found (all are older than last processed)', [
+                'fetched' => $fetchResult['count'],
+                'skipped_old' => $skippedOld,
+                'last_timestamp' => $lastTimestamp ? $lastTimestamp->toDateTimeString() : 'none',
+            ]);
+            
+            return [
+                'success' => true,
+                'message' => 'No new detections found (all are older than last processed)',
+                'fetched' => $fetchResult['count'],
+                'stored' => 0,
+                'skipped' => $fetchResult['count'],
+                'errors' => 0,
+            ];
+        }
+
+        Log::info('Processing new detections', [
+            'total_fetched' => $fetchResult['count'],
+            'new_detections' => count($newDetections),
+            'skipped_old' => $skippedOld,
+        ]);
+
+        // Store only the new detections
+        $storeResult = $this->storeCameraLogs($newDetections);
 
         return [
             'success' => true,
             'message' => 'Camera logs fetched and stored successfully',
             'fetched' => $fetchResult['count'],
             'stored' => $storeResult['stored'],
-            'skipped' => $storeResult['skipped'],
+            'skipped' => $storeResult['skipped'] + $skippedOld, // Include old detections in skipped count
             'errors' => $storeResult['errors'],
         ];
     }
@@ -450,11 +667,34 @@ class CameraDetectionService
                                 'processing_status' => 'pending_vehicle_type',
                                 'processing_notes' => 'Vehicle not found - awaiting vehicle type selection',
                             ]);
-                            Log::info('Detection marked as pending vehicle type', [
+                            Log::info('Detection marked as pending vehicle type (vehicle not found)', [
                                 'detection_id' => $detection->id,
                                 'plate_number' => $plateNumber,
                             ]);
                             continue; // Skip processing, wait for manual intervention
+                        }
+                        
+                        // IMPORTANT: For entry detections, always show to operator first
+                        // This ensures operator can review and confirm before processing
+                        // Only auto-process if it's clearly an exit (direction=1 AND has active passage)
+                        $isEntryDirection = ($direction === 0 || $direction === null);
+                        
+                        if ($isEntryDirection) {
+                            // Entry detection - mark as pending_vehicle_type for operator review
+                            // For existing vehicles, operator can process without body type selection
+                            // For new vehicles, operator must select body type
+                            $detection->update([
+                                'processing_status' => 'pending_vehicle_type',
+                                'processing_notes' => $vehicle 
+                                    ? 'Entry detection for existing vehicle - awaiting operator confirmation (body type not required)'
+                                    : 'Entry detection - awaiting vehicle type selection',
+                            ]);
+                            Log::info('Detection marked as pending vehicle type (entry detection)', [
+                                'detection_id' => $detection->id,
+                                'plate_number' => $plateNumber,
+                                'vehicle_exists' => (bool) $vehicle,
+                            ]);
+                            continue; // Skip auto-processing, wait for operator confirmation
                         }
 
                         // Check if vehicle has active passage (is parked)

@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use App\Services\CameraDetectionService;
 use App\Services\VehiclePassageService;
+use App\Models\Gate;
 use Illuminate\Support\Facades\Log;
 
 class FetchCameraData extends Command
@@ -65,55 +66,99 @@ class FetchCameraData extends Command
             $date = $this->option('date');
             $dateTime = $date ? \Carbon\Carbon::parse($date) : null;
             
-            $this->info('Fetching data from camera API...');
+            // Get all active gates with active camera devices
+            $gates = Gate::where('is_active', true)
+                ->with(['devices' => function($query) {
+                    $query->where('device_type', 'camera')
+                          ->where('status', 'active');
+                }])
+                ->get();
             
-            // Fetch and store camera logs
-            $result = $this->cameraDetectionService->fetchAndStoreLogs($dateTime);
+            $totalFetched = 0;
+            $totalStored = 0;
+            $totalSkipped = 0;
+            $totalErrors = 0;
+            $totalProcessed = 0;
+            
+            foreach ($gates as $gate) {
+                $cameras = $gate->devices->where('device_type', 'camera')->where('status', 'active');
+                
+                if ($cameras->isEmpty()) {
+                    $this->line("⚠ Gate '{$gate->name}' (ID: {$gate->id}) has no active camera devices - skipping");
+                    continue;
+                }
+                
+                // Use the first active camera for this gate
+                $cameraDevice = $cameras->first();
+                
+                $this->info("📷 Fetching from gate '{$gate->name}' (ID: {$gate->id}) - Camera: {$cameraDevice->ip_address}");
+                
+                // Set camera configuration from gate device
+                $this->cameraDetectionService->setCameraFromDevice($cameraDevice);
+                
+                // Fetch and store camera logs for this gate
+                $result = $this->cameraDetectionService->fetchAndStoreLogs($dateTime);
 
-            if ($result['success']) {
-                $this->info("✓ Successfully fetched {$result['fetched']} detections");
-                $this->info("✓ Stored {$result['stored']} new detections");
-                
-                if ($result['skipped'] > 0) {
-                    $this->warn("⚠ Skipped {$result['skipped']} duplicate detections");
+                if ($result['success']) {
+                    $totalFetched += $result['fetched'];
+                    $totalStored += $result['stored'];
+                    $totalSkipped += $result['skipped'];
+                    $totalErrors += $result['errors'];
+                    
+                    $this->info("  ✓ Fetched: {$result['fetched']}, Stored: {$result['stored']}, Skipped: {$result['skipped']}");
+                    
+                    if ($result['errors'] > 0) {
+                        $this->warn("  ⚠ Errors: {$result['errors']}");
+                    }
+                } else {
+                    $this->warn("  ⚠ Failed for gate '{$gate->name}': {$result['message']}");
+                    $totalErrors++;
                 }
-                
-                if ($result['errors'] > 0) {
-                    $this->error("✗ Failed to store {$result['errors']} detections");
-                }
-                
-                // Process unprocessed detections into vehicle passages
+            }
+            
+            // Process all unprocessed detections (across all gates) into vehicle passages
+            if ($totalStored > 0 || $gates->isNotEmpty()) {
                 $this->info('Processing detections into vehicle passages...');
                 $processResult = $this->cameraDetectionService->processUnprocessedDetections();
                 
                 if ($processResult['success']) {
-                    if ($processResult['processed'] > 0) {
-                        $this->info("✓ Processed {$processResult['processed']} detections into passages");
+                    $totalProcessed = $processResult['processed'] ?? 0;
+                    
+                    if ($totalProcessed > 0) {
+                        $this->info("✓ Processed {$totalProcessed} detections into passages");
                     }
                     
-                    if ($processResult['errors'] > 0) {
+                    if (($processResult['errors'] ?? 0) > 0) {
                         $this->warn("⚠ Failed to process {$processResult['errors']} detections");
                     }
                     
-                    if ($processResult['processed'] === 0 && $processResult['errors'] === 0) {
+                    if ($totalProcessed === 0 && ($processResult['errors'] ?? 0) === 0) {
                         $this->line("ℹ No unprocessed detections to process");
                     }
                 } else {
                     $this->error("✗ Failed to process detections: {$processResult['message']}");
                 }
-                
-                Log::info('Camera data fetch completed', array_merge($result, [
-                    'passages_processed' => $processResult['processed'] ?? 0,
-                    'passages_errors' => $processResult['errors'] ?? 0,
-                ]));
-                
-                return Command::SUCCESS;
-            } else {
-                $this->error("✗ Failed to fetch camera data: {$result['message']}");
-                Log::error('Camera data fetch failed', $result);
-                
-                return Command::FAILURE;
             }
+            
+            // Summary
+            $this->info("\n=== Summary ===");
+            $this->info("Total fetched: {$totalFetched}");
+            $this->info("Total stored: {$totalStored}");
+            $this->info("Total skipped: {$totalSkipped}");
+            $this->info("Total processed: {$totalProcessed}");
+            if ($totalErrors > 0) {
+                $this->warn("Total errors: {$totalErrors}");
+            }
+            
+            Log::info('Camera data fetch completed', [
+                'total_fetched' => $totalFetched,
+                'total_stored' => $totalStored,
+                'total_skipped' => $totalSkipped,
+                'total_errors' => $totalErrors,
+                'total_processed' => $totalProcessed,
+            ]);
+            
+            return Command::SUCCESS;
             
         } catch (\Exception $e) {
             $this->error("✗ Error: {$e->getMessage()}");

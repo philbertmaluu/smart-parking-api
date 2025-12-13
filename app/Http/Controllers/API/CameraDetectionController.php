@@ -516,8 +516,49 @@ class CameraDetectionController extends BaseController
                 }
             }
 
-            $count = $detections->count();
-            $detectionsArray = $detections->values()->toArray();
+            // OPTIMIZED: Batch vehicle lookups to avoid N+1 query problem
+            // Collect all unique plate numbers
+            $plateNumbers = $detections
+                ->map(function ($detection) {
+                    return trim($detection->numberplate);
+                })
+                ->filter(function ($plate) {
+                    return !empty($plate);
+                })
+                ->unique()
+                ->values()
+                ->toArray();
+            
+            // Fetch all vehicles in a single query
+            $vehiclesMap = [];
+            if (!empty($plateNumbers)) {
+                $vehicles = \App\Models\Vehicle::whereIn('plate_number', $plateNumbers)
+                    ->with(['bodyType'])
+                    ->get();
+                
+                // Create a map for quick lookup: plate_number => vehicle
+                foreach ($vehicles as $vehicle) {
+                    $vehiclesMap[$vehicle->plate_number] = $vehicle;
+                }
+            }
+            
+            // Add vehicle_exists flag to each detection using the map
+            $detectionsWithVehicleInfo = $detections->map(function ($detection) use ($vehiclesMap) {
+                $plateNumber = trim($detection->numberplate);
+                $vehicleExists = false;
+                
+                if (!empty($plateNumber) && isset($vehiclesMap[$plateNumber])) {
+                    $vehicleExists = true;
+                }
+                
+                $detectionArray = $detection->toArray();
+                $detectionArray['vehicle_exists'] = $vehicleExists;
+                
+                return $detectionArray;
+            });
+            
+            $count = $detectionsWithVehicleInfo->count();
+            $detectionsArray = $detectionsWithVehicleInfo->values()->toArray();
             
             // Log queue status for debugging
             Log::info('Pending vehicle type detections retrieved', [
@@ -576,25 +617,65 @@ class CameraDetectionController extends BaseController
                 }
             }
 
-            // Load vehicle and active passage information for each detection
-            $detectionsWithPassage = $detections->map(function ($detection) {
+            // OPTIMIZED: Batch vehicle and passage lookups to avoid N+1 query problem
+            // Collect all unique plate numbers
+            $plateNumbers = $detections
+                ->map(function ($detection) {
+                    return trim($detection->numberplate);
+                })
+                ->filter(function ($plate) {
+                    return !empty($plate);
+                })
+                ->unique()
+                ->values()
+                ->toArray();
+            
+            // Fetch all vehicles in a single query
+            $vehiclesMap = [];
+            if (!empty($plateNumbers)) {
+                $vehicles = \App\Models\Vehicle::whereIn('plate_number', $plateNumbers)
+                    ->with(['bodyType'])
+                    ->get();
+                
+                // Create a map for quick lookup: plate_number => vehicle
+                foreach ($vehicles as $vehicle) {
+                    $vehiclesMap[$vehicle->plate_number] = $vehicle;
+                }
+            }
+            
+            // Fetch all active passages in a single query
+            $activePassagesMap = [];
+            if (!empty($vehiclesMap)) {
+                $vehicleIds = array_map(function ($vehicle) {
+                    return $vehicle->id;
+                }, $vehiclesMap);
+                
+                $activePassages = \App\Models\VehiclePassage::whereIn('vehicle_id', $vehicleIds)
+                    ->where('status', 'active')
+                    ->with(['vehicle', 'entryGate', 'exitGate'])
+                    ->get();
+                
+                // Create a map for quick lookup: vehicle_id => active_passage
+                foreach ($activePassages as $passage) {
+                    $activePassagesMap[$passage->vehicle_id] = $passage;
+                }
+            }
+            
+            // Load vehicle and active passage information for each detection using the maps
+            $detectionsWithPassage = $detections->map(function ($detection) use ($vehiclesMap, $activePassagesMap) {
                 $plateNumber = trim($detection->numberplate);
                 if (empty($plateNumber)) {
                     return null;
                 }
 
-                // Get vehicle
-                $vehicle = $this->vehicleRepository->lookupByPlateNumber($plateNumber);
+                // Get vehicle from map
+                $vehicle = $vehiclesMap[$plateNumber] ?? null;
                 if (!$vehicle) {
                     return null;
                 }
 
-                // Get active passage
-                $lookupResult = $this->vehiclePassageService->quickPlateLookup($plateNumber);
-                $activePassage = null;
-                if ($lookupResult['success'] && isset($lookupResult['data']['active_passage'])) {
-                    $activePassage = $lookupResult['data']['active_passage'];
-                }
+                // Get active passage from map
+                $activePassage = $activePassagesMap[$vehicle->id] ?? null;
 
                 return [
                     'id' => $detection->id,

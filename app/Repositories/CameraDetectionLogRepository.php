@@ -105,5 +105,21 @@ class CameraDetectionLogRepository extends BaseRepository
         $latest = $this->model->orderBy('detection_timestamp', 'desc')->first();
         return $latest ? $latest->detection_timestamp : null;
     }
+
+    /**
+     * Get latest detection timestamp for a specific gate.
+     * This helps filter out old detections and only process new ones.
+     *
+     * @param int $gateId
+     * @return \Carbon\Carbon|null
+     */
+    public function getLatestDetectionTimestampForGate(int $gateId): ?\Carbon\Carbon
+    {
+        $latest = $this->model
+            ->where('gate_id', $gateId)
+            ->orderBy('detection_timestamp', 'desc')
+            ->first();
+        return $latest ? $latest->detection_timestamp : null;
+    }
 }
 

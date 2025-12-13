@@ -18,11 +18,12 @@ Schedule::command('passages:update-total-amounts')
 
 // Schedule camera detection log fetching
 // Run every 2 seconds to fetch new plate number detections from ZKTeco camera
+// Note: Removed withoutOverlapping() to ensure it runs every 2 seconds even if previous run is still executing
 Schedule::command('fetch:camera-data')
     ->everyTwoSeconds()
     ->timezone('Africa/Dar_es_Salaam')
-    ->withoutOverlapping()
-    ->runInBackground();
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/schedule-camera.log')); // Log output for debugging
 
 // Schedule periodic camera preview fetch job for devices that support snapshot.
 // Runs every minute; this schedules an Artisan command which dispatches the jobs.

@@ -56,14 +56,46 @@ class ReceiptPrinterService
                     $this->config['network']['port']
                 );
             } elseif ($connectionType === 'windows') {
-                // Windows shared printer
-                // Share name should be set (e.g., "POS80C")
+                // Windows shared printer (for USB printers shared on network)
+                // IMPORTANT: For online backend, the server must be able to access the shared printer
+                // Format: \\COMPUTER_NAME\SHARE_NAME or just SHARE_NAME if on same network
+                $shareName = $this->config['windows']['share_name'] ?? 'POS80C';
+                $printerName = $this->config['windows']['name'] ?? 'POS-80C';
+                
+                // Remove quotes if present (from .env file)
+                $shareName = trim($shareName, '"\'');
+                $printerName = trim($printerName, '"\'');
+                
+                // Try share name first (most reliable for shared printers)
+                try {
+                    $connector = new WindowsPrintConnector($shareName);
+                } catch (Exception $e) {
+                    // Fallback to printer name if share name fails
+                    Log::warning('Failed to connect using share name, trying printer name', [
+                        'share_name' => $shareName,
+                        'error' => $e->getMessage()
+                    ]);
+                    try {
+                        $connector = new WindowsPrintConnector($printerName);
+                    } catch (Exception $e2) {
+                        // If both fail, log detailed error
+                        Log::error('Both share name and printer name failed', [
+                            'share_name' => $shareName,
+                            'printer_name' => $printerName,
+                            'error' => $e2->getMessage()
+                        ]);
+                        throw $e2;
+                    }
+                }
+            } elseif ($connectionType === 'usb') {
+                // USB printer - use printer name or share name
+                // For USB printers, WindowsPrintConnector can use the printer name directly
+                $printerName = $this->config['windows']['name'] ?? $this->config['usb']['device'] ?? 'POS-80C';
+                $connector = new WindowsPrintConnector($printerName);
+            } else {
+                // Default: try windows connection
                 $shareName = $this->config['windows']['share_name'] ?? 'POS80C';
                 $connector = new WindowsPrintConnector($shareName);
-            } else {
-                // USB printer - use share name or device path
-                $device = $this->config['usb']['device'] ?? 'POS-80C';
-                $connector = new WindowsPrintConnector($device);
             }
 
             $this->printer = new Printer($connector);
