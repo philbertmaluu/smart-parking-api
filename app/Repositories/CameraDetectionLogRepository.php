@@ -131,14 +131,19 @@ class CameraDetectionLogRepository extends BaseRepository
     /**
      * Get latest detection timestamp for a specific gate.
      * This helps filter out old detections and only process new ones.
+     * IMPORTANT: Only consider processed detections to ensure new detections aren't blocked
+     * by pending ones that haven't been processed yet.
      *
      * @param int $gateId
      * @return \Carbon\Carbon|null
      */
     public function getLatestDetectionTimestampForGate(int $gateId): ?\Carbon\Carbon
     {
+        // Only get the latest PROCESSED detection timestamp
+        // This ensures that new detections aren't blocked by pending ones
         $latest = $this->model
             ->where('gate_id', $gateId)
+            ->where('processed', true) // Only consider processed detections
             ->orderBy('detection_timestamp', 'desc')
             ->first();
         return $latest ? $latest->detection_timestamp : null;
