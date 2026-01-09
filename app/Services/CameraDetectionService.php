@@ -255,6 +255,8 @@ class CameraDetectionService
                 // Map and store
                 $logData = $this->mapDetectionToLogData($detection);
                 $this->repository->createDetectionLog($logData);
+                $createdLog = CameraDetectionLog::latest('id')->first(); // Simple way to get the one just created
+                event(new \App\Events\NewVehicleDetection($createdLog));
                 $stored++;
 
                 Log::info('✅ Stored NEW camera detection', [
