@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Http\Request;
 use App\Http\Controllers\API\StationController;
 use App\Http\Controllers\API\GateController;
 use App\Http\Controllers\API\VehicleController;
@@ -31,6 +32,81 @@ Route::prefix('toll-v1')->group(function () {
     Route::post('/forgot-password', [AuthController::class, 'sendResetLink']);
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
+    Route::post('/gate/control', function(Request $request) {
+    $command = $request->input('command', 'hell');
+    $port = $request->input('port', null);
+    
+    // Auto-detect port if not specified
+    if (!$port) {
+        exec('wmic path Win32_SerialPort get DeviceID', $output);
+        $availablePorts = [];
+        foreach ($output as $line) {
+            if (preg_match('/COM\d+/', $line, $matches)) {
+                $availablePorts[] = trim($matches[0]);
+            }
+        }
+        $port = !empty($availablePorts) ? $availablePorts[0] : 'COM4';
+    }
+    
+    // Method 1: Try direct fopen/fwrite
+    $method1Success = false;
+    $fp = @fopen($port, 'w');
+    if ($fp) {
+        fwrite($fp, $command . "\r\n");
+        fclose($fp);
+        $method1Success = true;
+    }
+    
+    // Method 2: Try exec with cmd
+    exec("cmd /c echo {$command} > {$port}", $output1, $return1);
+    
+    // Method 3: Try shell_exec
+    $output2 = shell_exec("echo {$command} > {$port}");
+    
+    // Method 4: Try system command
+    system("echo {$command} > {$port}", $return2);
+    
+    \Log::info('Gate Control Attempts', [
+        'port' => $port,
+        'command' => $command,
+        'method1_fopen' => $method1Success,
+        'method2_exec_return' => $return1,
+        'method3_shell_exec' => $output2,
+        'method4_system_return' => $return2
+    ]);
+    
+    return response()->json([
+        'success' => true,
+        'message' => 'Gate command sent via multiple methods',
+        'command' => $command,
+        'port' => $port,
+        'methods_tried' => [
+            'fopen' => $method1Success,
+            'exec' => $return1 === 0,
+            'shell_exec' => !empty($output2),
+            'system' => $return2 === 0
+        ]
+    ]);
+});
+Route::get('/gate/available-ports', function() {
+    exec('wmic path Win32_SerialPort get DeviceID,Description,Name', $output);
+    
+    $ports = [];
+    foreach ($output as $line) {
+        if (preg_match('/COM\d+/', $line, $matches)) {
+            $ports[] = [
+                'port' => trim($matches[0]),
+                'description' => trim($line)
+            ];
+        }
+    }
+    
+    return response()->json([
+        'success' => true,
+        'ports' => $ports,
+        'default' => !empty($ports) ? $ports[0]['port'] : 'COM4'
+    ]);
+});
     // Public camera config endpoint (for operators to view cameras)
     Route::get('/gates/{gate}/camera-config', [GateController::class, 'getCameraConfig']);
 
