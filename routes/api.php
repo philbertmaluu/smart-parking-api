@@ -31,80 +31,145 @@ Route::prefix('toll-v1')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/forgot-password', [AuthController::class, 'sendResetLink']);
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
-
-    Route::post('/gate/control', function(Request $request) {
+Route::post('/gate/control', function (Request $request) {
     $command = $request->input('command', 'hell');
-    $port = $request->input('port', null);
-    
-    // Auto-detect port if not specified
+    $port = $request->input('port'); // optional - if not given, auto-detect
+    $gateId = $request->input('gate_id');
+
+    Log::info('Gate control requested', [
+        'gate_id' => $gateId,
+        'command' => $command,
+        'port'    => $port,
+        'ip'      => $request->ip(),
+        'os'      => PHP_OS_FAMILY,
+    ]);
+
+    $success = false;
+    $methods = [];
+    $errors = [];
+
+    // Auto-detect port if not provided
     if (!$port) {
-        exec('wmic path Win32_SerialPort get DeviceID', $output);
-        $availablePorts = [];
-        foreach ($output as $line) {
-            if (preg_match('/COM\d+/', $line, $matches)) {
-                $availablePorts[] = trim($matches[0]);
+        if (PHP_OS_FAMILY === 'Windows') {
+            // Windows: find first COM port
+            exec('wmic path Win32_SerialPort get DeviceID', $wmicOutput);
+            foreach ($wmicOutput as $line) {
+                if (preg_match('/COM\d+/', $line, $matches)) {
+                    $port = trim($matches[0]);
+                    break;
+                }
             }
+            $port = $port ?: 'COM4'; // fallback
+        } else {
+            // Linux: find first ttyUSB or ttyACM
+            exec('ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null', $lsOutput);
+            $port = !empty($lsOutput) ? trim($lsOutput[0]) : '/dev/ttyUSB0';
         }
-        $port = !empty($availablePorts) ? $availablePorts[0] : 'COM4';
     }
-    
-    // Method 1: Try direct fopen/fwrite
+
+    Log::info('Using port', ['port' => $port]);
+
+    // Method 1: fopen/fwrite (works on both Windows & Linux with permissions)
     $method1Success = false;
     $fp = @fopen($port, 'w');
-    if ($fp) {
+    if ($fp !== false) {
         fwrite($fp, $command . "\r\n");
         fclose($fp);
         $method1Success = true;
+        $success = true;
+    } else {
+        $errors[] = "fopen failed: " . error_get_last()['message'] ?? 'Permission denied or port not found';
     }
-    
-    // Method 2: Try exec with cmd
-    exec("cmd /c echo {$command} > {$port}", $output1, $return1);
-    
-    // Method 3: Try shell_exec
-    $output2 = shell_exec("echo {$command} > {$port}");
-    
-    // Method 4: Try system command
-    system("echo {$command} > {$port}", $return2);
-    
-    \Log::info('Gate Control Attempts', [
+    $methods['fopen'] = $method1Success;
+
+    // Method 2: exec with cmd (Windows) or sh (Linux)
+    if (PHP_OS_FAMILY === 'Windows') {
+        exec("cmd /c echo $command > $port", $output1, $return1);
+    } else {
+        exec("echo '$command' > $port 2>&1", $output1, $return1);
+    }
+    $methods['exec'] = ($return1 === 0);
+    if ($return1 !== 0) {
+        $errors[] = "exec failed (code $return1): " . implode("\n", $output1);
+    } else {
+        $success = true;
+    }
+
+    // Method 3: shell_exec
+    if (PHP_OS_FAMILY === 'Windows') {
+        $output2 = shell_exec("cmd /c echo $command > $port");
+    } else {
+        $output2 = shell_exec("echo '$command' > $port 2>&1");
+    }
+    $methods['shell_exec'] = !empty($output2);
+    if (empty($output2)) {
+        $errors[] = "shell_exec returned empty or failed";
+    } else {
+        $success = true;
+    }
+
+    // Method 4: system
+    ob_start();
+    if (PHP_OS_FAMILY === 'Windows') {
+        system("cmd /c echo $command > $port", $return2);
+    } else {
+        system("echo '$command' > $port 2>&1", $return2);
+    }
+    $systemOutput = ob_get_clean();
+    $methods['system'] = ($return2 === 0);
+    if ($return2 !== 0) {
+        $errors[] = "system failed (code $return2)";
+    } else {
+        $success = true;
+    }
+
+    // Log full attempts
+    Log::info('Gate Control Attempts', [
         'port' => $port,
         'command' => $command,
-        'method1_fopen' => $method1Success,
-        'method2_exec_return' => $return1,
-        'method3_shell_exec' => $output2,
-        'method4_system_return' => $return2
+        'methods' => $methods,
+        'errors' => $errors,
     ]);
-    
-    return response()->json([
-        'success' => true,
-        'message' => 'Gate command sent via multiple methods',
-        'command' => $command,
-        'port' => $port,
-        'methods_tried' => [
-            'fopen' => $method1Success,
-            'exec' => $return1 === 0,
-            'shell_exec' => !empty($output2),
-            'system' => $return2 === 0
-        ]
-    ]);
+
+    if ($success) {
+        return response()->json([
+            'success' => true,
+            'message' => 'Gate command sent successfully',
+            'port' => $port,
+            'methods_tried' => $methods,
+        ]);
+    } else {
+        return response()->json([
+            'success' => false,
+            'message' => 'All methods failed to execute gate command',
+            'errors' => $errors,
+            'methods_tried' => $methods,
+        ], 500);
+    }
 });
-Route::get('/gate/available-ports', function() {
-    exec('wmic path Win32_SerialPort get DeviceID,Description,Name', $output);
-    
+
+// Optional: Endpoint to list available serial ports (useful for debugging)
+Route::get('/gate/available-ports', function () {
     $ports = [];
-    foreach ($output as $line) {
-        if (preg_match('/COM\d+/', $line, $matches)) {
-            $ports[] = [
-                'port' => trim($matches[0]),
-                'description' => trim($line)
-            ];
+
+    if (PHP_OS_FAMILY === 'Windows') {
+        exec('wmic path Win32_SerialPort get DeviceID,Description,Name', $output);
+        foreach ($output as $line) {
+            if (preg_match('/COM\d+/', $line, $matches)) {
+                $ports[] = trim($matches[0]);
+            }
+        }
+    } else {
+        exec('ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null', $output);
+        foreach ($output as $line) {
+            $ports[] = trim($line);
         }
     }
-    
+
     return response()->json([
         'success' => true,
         'ports' => $ports,
-        'default' => !empty($ports) ? $ports[0]['port'] : 'COM4'
+        'default' => !empty($ports) ? $ports[0] : (PHP_OS_FAMILY === 'Windows' ? 'COM4' : '/dev/ttyUSB0'),
     ]);
 });
     // Public camera config endpoint (for operators to view cameras)
