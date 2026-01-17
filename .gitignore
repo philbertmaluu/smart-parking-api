@@ -22,3 +22,7 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+# Windows reserved device names
+COM*
+LPT*
+
