@@ -173,7 +173,7 @@ class VehiclePassageService
                 ];
             }
 
-            // Get active passage
+            // Get active passage with all needed relations
             $activePassage = $this->passageRepository->getActivePassageByVehicle($vehicle->id);
             if (!$activePassage) {
                 DB::rollBack();
@@ -185,8 +185,12 @@ class VehiclePassageService
                 ];
             }
 
-            // Get gate and station information
-            $gate = Gate::with('station')->findOrFail($gateId);
+            // Use cached gate if we already have it, otherwise fetch with relations
+            if ($activePassage->exitGate && $activePassage->exitGate->station) {
+                $gate = $activePassage->exitGate;
+            } else {
+                $gate = Gate::with('station')->findOrFail($gateId);
+            }
 
             // Complete passage exit
             $exitData = [
@@ -220,9 +224,11 @@ class VehiclePassageService
                     ]);
                     
                     // Set paid_until to FIRST_ENTRY + 24 hours — free window starts from first entry in 24h window
+                    // Use selective query with index to get first entry
                     try {
                         $firstEntryIn24h = \App\Models\VehiclePassage::where('vehicle_id', $vehicle->id)
                             ->where('entry_time', '>=', now()->subHours(24))
+                            ->select(['entry_time'])  // Only select needed column for performance
                             ->orderBy('entry_time', 'asc')
                             ->first();
 
@@ -258,8 +264,10 @@ class VehiclePassageService
                 ]);
             }
 
-            // Reload passage with receipts
-            $passage->load('receipts');
+            // Load receipts only if needed (lazily load if not already loaded)
+            if (!$passage->relationLoaded('receipts')) {
+                $passage->load('receipts');
+            }
 
             // Determine gate action based on payment status
             $gateAction = $this->determineExitGateAction($passage, $additionalData);

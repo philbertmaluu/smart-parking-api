@@ -127,7 +127,13 @@ class VehiclePassageRepository
      */
     public function completePassageExit(int $passageId, array $data): ?VehiclePassage
     {
-        $passage = $this->model->find($passageId);
+        $passage = $this->model->with([
+            'vehicle.bodyType',
+            'entryGate.station',
+            'exitGate.station',
+            'account',
+            'paymentType'
+        ])->find($passageId);
 
         if (!$passage || $passage->isCompleted()) {
             return null;
@@ -190,7 +196,8 @@ class VehiclePassageRepository
         }
 
         $passage->update($data);
-        return $passage->fresh();
+        // Return the passage from cache with updated data instead of fresh query
+        return $passage->refresh();
     }
 
     /**
@@ -645,7 +652,15 @@ class VehiclePassageRepository
      */
     public function getActivePassageByVehicle(int $vehicleId): ?VehiclePassage
     {
-        return $this->model->where('vehicle_id', $vehicleId)
+        return $this->model->with([
+            'vehicle.bodyType',
+            'entryGate.station',
+            'exitGate.station',
+            'account',
+            'paymentType',
+            'bundleSubscription'
+        ])
+            ->where('vehicle_id', $vehicleId)
             ->whereNull('exit_time')
             ->where('status', 'active')
             ->first();
