@@ -64,16 +64,36 @@ class PricingService
     {
         // Step 1: Check if vehicle is exempted
         if ($vehicle->isCurrentlyExempted()) {
-            return PaymentType::where('name', 'Exemption')->first();
+            return $this->getPaymentTypeByName('Exemption');
         }
 
         // Step 2: Check for active bundle subscription
         if ($account && $this->hasActiveBundleSubscription($account)) {
-            return PaymentType::where('name', 'Bundle')->first();
+            return $this->getPaymentTypeByName('Bundle');
         }
 
         // Step 3: Default to cash payment
-        return PaymentType::where('name', 'Cash')->first();
+        return $this->getPaymentTypeByName('Cash');
+    }
+
+    /**
+     * Get PaymentType by name with static caching
+     * Prevents repeated database queries for the same payment types
+     * Cache is maintained per request
+     *
+     * @param string $name
+     * @return PaymentType
+     */
+    private function getPaymentTypeByName(string $name): PaymentType
+    {
+        static $paymentTypeCache = [];
+        
+        if (!isset($paymentTypeCache[$name])) {
+            $paymentTypeCache[$name] = PaymentType::where('name', $name)
+                ->firstOrFail();
+        }
+        
+        return $paymentTypeCache[$name];
     }
 
     /**
@@ -84,10 +104,11 @@ class PricingService
      */
     private function calculateExemptionPricing(Vehicle $vehicle): array
     {
+        $exemptionType = $this->getPaymentTypeByName('Exemption');
         return [
             'amount' => 0,
             'payment_type' => 'Exemption',
-            'payment_type_id' => PaymentType::where('name', 'Exemption')->first()->id,
+            'payment_type_id' => $exemptionType->id,
             'requires_payment' => false,
             'description' => 'Exempted vehicle: ' . ($vehicle->exemption_reason ?? 'No reason specified'),
             'base_amount' => 0,
@@ -106,11 +127,12 @@ class PricingService
     private function calculateBundlePricing(Vehicle $vehicle, Account $account): array
     {
         $bundleSubscription = $this->getActiveBundleSubscription($account);
+        $bundleType = $this->getPaymentTypeByName('Bundle');
 
         return [
             'amount' => 0,
             'payment_type' => 'Bundle',
-            'payment_type_id' => PaymentType::where('name', 'Bundle')->first()->id,
+            'payment_type_id' => $bundleType->id,
             'requires_payment' => false,
             'description' => 'Bundle subscription active: ' . ($bundleSubscription->bundle->name ?? 'Unknown bundle'),
             'base_amount' => 0,
@@ -129,6 +151,9 @@ class PricingService
      */
     private function calculateCashPricing(Vehicle $vehicle, Station $station): array
     {
+        // Cache the cash payment type
+        $cashType = $this->getPaymentTypeByName('Cash');
+        
         // Check if vehicle has body_type_id
         if (!$vehicle->body_type_id) {
             Log::info('Vehicle has no body type - will be set during exit', [
@@ -139,7 +164,7 @@ class PricingService
             return [
                 'amount' => 0,
                 'payment_type' => 'Cash',
-                'payment_type_id' => PaymentType::where('name', 'Cash')->first()->id,
+                'payment_type_id' => $cashType->id,
                 'requires_payment' => false,
                 'description' => 'Vehicle type to be determined at exit',
                 'base_amount' => 0,
@@ -161,7 +186,7 @@ class PricingService
             return [
                 'amount' => 0,
                 'payment_type' => 'Cash',
-                'payment_type_id' => PaymentType::where('name', 'Cash')->first()->id,
+                'payment_type_id' => $cashType->id,
                 'requires_payment' => false,
                 'description' => 'No pricing configured for this vehicle type and station',
                 'base_amount' => 0,
@@ -173,7 +198,7 @@ class PricingService
         return [
             'amount' => $basePrice->base_price,
             'payment_type' => 'Cash',
-            'payment_type_id' => PaymentType::where('name', 'Cash')->first()->id,
+            'payment_type_id' => $cashType->id,
             'requires_payment' => true,
             'description' => 'Toll fee required',
             'base_amount' => $basePrice->base_price,
